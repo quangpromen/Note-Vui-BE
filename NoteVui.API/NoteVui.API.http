@@ -1,0 +1,6 @@
+@NoteVui.API_HostAddress = http://localhost:5082
+
+GET {{NoteVui.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
