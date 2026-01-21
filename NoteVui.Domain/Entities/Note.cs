@@ -1,0 +1,45 @@
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using NoteVui.Domain.Entities.Identity;
+
+namespace NoteVui.Domain.Entities;
+
+[Table("notes")]
+public class Note
+{
+    [Key]
+    [Column("note_id")]
+    public int NoteId { get; set; }
+
+    [Column("user_id")]
+    public string UserId { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(255)]
+    [Column("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(200)]
+    [Column("short_preview")]
+    public string? ShortPreview { get; set; }
+
+    [Column("is_pinned")]
+    public bool IsPinned { get; set; } = false;
+
+    [Column("is_deleted")]
+    public bool IsDeleted { get; set; } = false;
+
+    [Column("deleted_at")]
+    public DateTime? DeletedAt { get; set; }
+
+    [Column("created_at")]
+    public DateTime? CreatedAt { get; set; }
+
+    [Column("updated_at")]
+    public DateTime? UpdatedAt { get; set; }
+
+    [ForeignKey(nameof(UserId))]
+    public virtual AppUser User { get; set; } = null!;
+
+    public virtual NoteContent? NoteContent { get; set; }
+}
