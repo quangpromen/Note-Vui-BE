@@ -482,8 +482,18 @@ $RECYCLE.BIN/
 # ASP.NET Core - User secrets (should NEVER be committed)
 **/appsettings.Development.json
 **/appsettings.*.json
-!**/appsettings.json
+**/appsettings.json
 secrets.json
+
+# Locally generated scripts and logs
+migration_script.sql
+build_log.txt
+/domain_build.log
+/error.log
+/error2.log
+/error8.log
+/error_infra.log
+/build_log.txt
 
 # Entity Framework Core Migrations (Optional - comment out if you want to commit migrations)
 # **/Migrations/

@@ -88,6 +88,7 @@ public class NoteService : INoteService
 
         var note = new Note
         {
+            ClientId = Guid.NewGuid(), // Auto-generate for API-created notes
             UserId = userId,
             Title = dto.Title,
             ShortPreview = dto.ShortPreview,
@@ -187,6 +188,7 @@ public class NoteService : INoteService
         return new NoteDto
         {
             NoteId = note.NoteId,
+            ClientId = note.ClientId,
             UserId = note.UserId,
             Title = note.Title,
             ShortPreview = note.ShortPreview,

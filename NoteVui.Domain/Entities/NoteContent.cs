@@ -8,6 +8,7 @@ public class NoteContent
 {
     [Key]
     [ForeignKey("Note")]
+    [Column("note_id")]
     public int NoteId { get; set; }
 
     [Column("full_content", TypeName = "nvarchar(max)")]

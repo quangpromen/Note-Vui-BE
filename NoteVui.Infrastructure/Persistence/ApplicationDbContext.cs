@@ -101,6 +101,10 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
             entity.HasOne(e => e.User).WithMany(u => u.Notes).HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => new { e.UserId, e.IsDeleted }, "IX_Notes_User_Active");
             entity.HasIndex(e => new { e.UserId, e.IsPinned }, "IX_Notes_User_Pinned");
+            // Index for sync: lookup by ClientId per user
+            entity.HasIndex(e => new { e.UserId, e.ClientId }, "IX_Notes_User_ClientId");
+            // Index for sync pull: query by UpdatedAt per user
+            entity.HasIndex(e => new { e.UserId, e.UpdatedAt }, "IX_Notes_User_UpdatedAt");
         });
     }
 

@@ -6,6 +6,12 @@ namespace NoteVui.Application.DTOs.Notes;
 public class NoteDto
 {
     public int NoteId { get; set; }
+    
+    /// <summary>
+    /// Client-generated unique identifier for offline-first synchronization.
+    /// </summary>
+    public Guid ClientId { get; set; }
+    
     public string UserId { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? ShortPreview { get; set; }

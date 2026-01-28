@@ -84,6 +84,7 @@ builder.Services.AddScoped<IApplicationDbContext>(provider =>
 
 // Register Application Services
 builder.Services.AddScoped<INoteService, NoteService>();
+builder.Services.AddScoped<ISyncService, SyncService>();
 builder.Services.AddScoped<IIdentityService, IdentityService>();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddHttpContextAccessor();
