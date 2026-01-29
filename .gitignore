@@ -479,14 +479,14 @@ $RECYCLE.BIN/
 ## .NET Core / ASP.NET Core Specific
 ##
 
-# ASP.NET Core - User secrets (should NEVER be committed)
-**/appsettings.Development.json
-**/appsettings.*.json
-**/appsettings.json
+# ASP.NET Core - User secrets
+# Keep appsettings.json and appsettings.Development.json as templates
+# but ignore any local or secret overrides
+**/appsettings.Local.json
 secrets.json
 
 # Locally generated scripts and logs
-migration_script.sql
+# migration_script.sql  <-- Un-comment if you want to keep this script in git
 build_log.txt
 /domain_build.log
 /error.log
