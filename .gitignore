@@ -578,3 +578,10 @@ Thumbs.db
 .vs/
 .vscode/
 .idea/
+
+# Agent related files
+.agent/
+.agent
+build_output.txt
+membership_migration.sql
+Scripts/AddMembershipSystem.sql
