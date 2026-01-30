@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NoteVui.Domain.Entities;
+using NoteVui.Domain.Entities.Membership;
 
 namespace NoteVui.Application.Interfaces;
 
@@ -16,6 +17,11 @@ public interface IApplicationDbContext
     DbSet<AiProvider> AiProviders { get; set; }
     DbSet<AiModel> AiModels { get; set; }
     DbSet<AiUsageLog> AiUsageLogs { get; set; }
+    
+    // Membership System
+    DbSet<UserSubscription> UserSubscriptions { get; set; }
+    DbSet<PaymentTransaction> PaymentTransactions { get; set; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
+

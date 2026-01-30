@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NoteVui.Application.Interfaces;
 using NoteVui.Domain.Entities;
 using NoteVui.Domain.Entities.Identity;
+using NoteVui.Domain.Entities.Membership;
 using NoteVui.Domain.Enums;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -28,6 +29,10 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
     public DbSet<AiModel> AiModels { get; set; } = null!;
     public DbSet<AiUsageLog> AiUsageLogs { get; set; } = null!;
 
+    // Membership System
+    public DbSet<UserSubscription> UserSubscriptions { get; set; } = null!;
+    public DbSet<PaymentTransaction> PaymentTransactions { get; set; } = null!;
+
     #endregion
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -51,6 +56,10 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
         ConfigureAiProvider(modelBuilder);
         ConfigureAiModel(modelBuilder);
         ConfigureAiUsageLog(modelBuilder);
+        
+        // Membership System
+        ConfigureUserSubscription(modelBuilder);
+        ConfigurePaymentTransaction(modelBuilder);
 
         // Seed data
         SeedUsers(modelBuilder);
@@ -165,6 +174,60 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
             entity.HasIndex(e => new { e.UserId, e.CreatedAt }, "IX_AiUsageLogs_User_CreatedAt");
             // Index for looking up by NoteId
             entity.HasIndex(e => e.NoteId, "IX_AiUsageLogs_NoteId").HasFilter("[NoteId] IS NOT NULL");
+        });
+    }
+
+    private static void ConfigureUserSubscription(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<UserSubscription>(entity =>
+        {
+            entity.ToTable("user_subscriptions");
+            entity.HasKey(e => e.Id);
+            
+            entity.Property(e => e.UserId).IsRequired();
+            entity.Property(e => e.PlanType).HasConversion<int>().HasDefaultValue(PlanType.Free);
+            entity.Property(e => e.Status).HasConversion<int>().HasDefaultValue(SubscriptionStatus.Active);
+            entity.Property(e => e.StartDate).HasDefaultValueSql("GETUTCDATE()");
+            entity.Property(e => e.EndDate).IsRequired();
+            entity.Property(e => e.IsAutoRenew).HasDefaultValue(false);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
+            
+            // One-to-One relationship: AppUser has one UserSubscription
+            entity.HasOne(e => e.User)
+                  .WithOne(u => u.UserSubscription)
+                  .HasForeignKey<UserSubscription>(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+            
+            entity.HasIndex(e => e.UserId, "IX_UserSubscriptions_UserId").IsUnique();
+            entity.HasIndex(e => new { e.UserId, e.Status, e.EndDate }, "IX_UserSubscriptions_User_Active");
+        });
+    }
+
+    private static void ConfigurePaymentTransaction(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PaymentTransaction>(entity =>
+        {
+            entity.ToTable("payment_transactions");
+            entity.HasKey(e => e.Id);
+            
+            entity.Property(e => e.UserId).IsRequired();
+            entity.Property(e => e.Amount).HasColumnType("decimal(18, 2)").IsRequired();
+            entity.Property(e => e.Currency).IsRequired().HasMaxLength(10).HasDefaultValue("VND");
+            entity.Property(e => e.TransactionCode).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Provider).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Status).HasConversion<int>().HasDefaultValue(TransactionStatus.Pending);
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
+            
+            // One-to-Many relationship: AppUser has many PaymentTransactions
+            entity.HasOne(e => e.User)
+                  .WithMany(u => u.PaymentTransactions)
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+            
+            entity.HasIndex(e => e.TransactionCode, "IX_PaymentTransactions_TransactionCode").IsUnique();
+            entity.HasIndex(e => e.UserId, "IX_PaymentTransactions_UserId");
+            entity.HasIndex(e => new { e.UserId, e.Status }, "IX_PaymentTransactions_User_Status");
         });
     }
 
