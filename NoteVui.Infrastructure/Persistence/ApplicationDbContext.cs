@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NoteVui.Application.Interfaces;
 using NoteVui.Domain.Entities;
 using NoteVui.Domain.Entities.Identity;
+using NoteVui.Domain.Enums;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 
@@ -25,6 +26,7 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
     public DbSet<NoteContent> NoteContents { get; set; } = null!;
     public DbSet<AiProvider> AiProviders { get; set; } = null!;
     public DbSet<AiModel> AiModels { get; set; } = null!;
+    public DbSet<AiUsageLog> AiUsageLogs { get; set; } = null!;
 
     #endregion
 
@@ -48,6 +50,7 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
         ConfigureNoteContent(modelBuilder);
         ConfigureAiProvider(modelBuilder);
         ConfigureAiModel(modelBuilder);
+        ConfigureAiUsageLog(modelBuilder);
 
         // Seed data
         SeedUsers(modelBuilder);
@@ -144,6 +147,24 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
             entity.HasOne(e => e.Provider).WithMany(p => p.AiModels).HasForeignKey(e => e.ProviderId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => e.ProviderId, "IX_AiModels_Provider");
             entity.HasIndex(e => new { e.ProviderId, e.ModelCode }, "IX_AiModels_Provider_ModelCode").IsUnique();
+        });
+    }
+
+    private static void ConfigureAiUsageLog(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AiUsageLog>(entity =>
+        {
+            entity.ToTable("ai_usage_logs");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Provider).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.ErrorMessage).HasMaxLength(500);
+            entity.Property(e => e.ActionType).HasConversion<int>();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
+            
+            // Index for quota queries: count by UserId and CreatedAt (for daily limits)
+            entity.HasIndex(e => new { e.UserId, e.CreatedAt }, "IX_AiUsageLogs_User_CreatedAt");
+            // Index for looking up by NoteId
+            entity.HasIndex(e => e.NoteId, "IX_AiUsageLogs_NoteId").HasFilter("[NoteId] IS NOT NULL");
         });
     }
 

@@ -15,6 +15,7 @@ public interface IApplicationDbContext
     DbSet<Subscription> Subscriptions { get; set; }
     DbSet<AiProvider> AiProviders { get; set; }
     DbSet<AiModel> AiModels { get; set; }
+    DbSet<AiUsageLog> AiUsageLogs { get; set; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
