@@ -66,9 +66,9 @@ public class AuthController : ControllerBase
     {
         try
         {
-            var userId = _currentUserService.UserId; 
+            var userId = _currentUserService.UserId;
             if (userId == null) return Unauthorized();
-            
+
             await _identityService.ChangePasswordAsync(userId, request);
             return Ok(new { message = "Password changed successfully" });
         }
@@ -77,18 +77,36 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
-    
+
     [Authorize]
     [HttpPut("profile")]
     public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequest request)
     {
-         try
+        try
         {
             var userId = _currentUserService.UserId;
             if (userId == null) return Unauthorized();
-            
+
             await _identityService.UpdateProfileAsync(userId, request);
-             return Ok(new { message = "Profile updated successfully" });
+            return Ok(new { message = "Profile updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [Authorize]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        try
+        {
+            var userId = _currentUserService.UserId;
+            if (userId == null) return Unauthorized();
+
+            await _identityService.RevokeTokenAsync(userId);
+            return Ok(new { message = "Logged out successfully" });
         }
         catch (Exception ex)
         {

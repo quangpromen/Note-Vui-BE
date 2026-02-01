@@ -56,8 +56,8 @@ public class IdentityService : IIdentityService
         var user = await _userManager.FindByEmailAsync(request.Email);
         if (user == null)
         {
-             // For security, generic message
-             throw new Exception("Invalid email or password.");
+            // For security, generic message
+            throw new Exception("Invalid email or password.");
         }
 
         var result = await _signInManager.CheckPasswordSignInAsync(user, request.Password, false);
@@ -77,7 +77,7 @@ public class IdentityService : IIdentityService
         {
             throw new Exception("Invalid token");
         }
-        
+
         var userId = principal.FindFirstValue(ClaimTypes.NameIdentifier);
         if (userId == null) throw new Exception("Invalid token claims");
 
@@ -89,26 +89,41 @@ public class IdentityService : IIdentityService
 
         return await GenerateAuthResponseAsync(user);
     }
-    
-    public async Task ChangePasswordAsync(string userId, ChangePasswordRequest request) {
+
+    public async Task ChangePasswordAsync(string userId, ChangePasswordRequest request)
+    {
         var user = await _userManager.FindByIdAsync(userId);
         if (user == null) throw new Exception("User not found");
-        
+
         var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
-        if (!result.Succeeded) {
-             throw new Exception(string.Join(", ", result.Errors.Select(e => e.Description)));
+        if (!result.Succeeded)
+        {
+            throw new Exception(string.Join(", ", result.Errors.Select(e => e.Description)));
         }
     }
-    
-    public async Task UpdateProfileAsync(string userId, UpdateProfileRequest request) {
+
+    public async Task UpdateProfileAsync(string userId, UpdateProfileRequest request)
+    {
         var user = await _userManager.FindByIdAsync(userId);
         if (user == null) throw new Exception("User not found");
-        
+
         user.FullName = request.FullName;
-        if (!string.IsNullOrEmpty(request.AvatarUrl)) {
+        if (!string.IsNullOrEmpty(request.AvatarUrl))
+        {
             user.AvatarUrl = request.AvatarUrl;
         }
-        
+
+        await _userManager.UpdateAsync(user);
+    }
+
+    public async Task RevokeTokenAsync(string userId)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user == null) throw new Exception("User not found");
+
+        user.RefreshToken = null;
+        user.RefreshTokenExpiryTime = null;
+
         await _userManager.UpdateAsync(user);
     }
 
@@ -116,19 +131,19 @@ public class IdentityService : IIdentityService
     {
         var authClaims = new List<Claim>
         {
-            new Claim(ClaimTypes.NameIdentifier, user.Id), 
+            new Claim(ClaimTypes.NameIdentifier, user.Id),
             new Claim(ClaimTypes.Email, user.Email!),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new Claim("FullName", user.FullName)
         };
 
         var secretKey = _configuration["JwtSettings:Key"];
-        if(string.IsNullOrEmpty(secretKey)) throw new Exception("JWT Key is missing in configuration");
-        
+        if (string.IsNullOrEmpty(secretKey)) throw new Exception("JWT Key is missing in configuration");
+
         var authSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
-        
+
         var tokenDurationStr = _configuration["JwtSettings:DurationInMinutes"];
-        if(!int.TryParse(tokenDurationStr, out int tokenDuration)) tokenDuration = 60;
+        if (!int.TryParse(tokenDurationStr, out int tokenDuration)) tokenDuration = 60;
 
         var token = new JwtSecurityToken(
             issuer: _configuration["JwtSettings:Issuer"],
@@ -140,7 +155,7 @@ public class IdentityService : IIdentityService
 
         var refreshToken = Guid.NewGuid().ToString();
         user.RefreshToken = refreshToken;
-        user.RefreshTokenExpiryTime = DateTime.Now.AddDays(7); 
+        user.RefreshTokenExpiryTime = DateTime.Now.AddDays(7);
 
         await _userManager.UpdateAsync(user);
 
@@ -160,16 +175,16 @@ public class IdentityService : IIdentityService
         var secretKey = _configuration["JwtSettings:Key"];
         var tokenValidationParameters = new TokenValidationParameters
         {
-            ValidateAudience = false, 
+            ValidateAudience = false,
             ValidateIssuer = false,
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey!)),
-            ValidateLifetime = false 
+            ValidateLifetime = false
         };
 
         var tokenHandler = new JwtSecurityTokenHandler();
         var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out SecurityToken securityToken);
-        
+
         if (securityToken is not JwtSecurityToken jwtSecurityToken || !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
             throw new SecurityTokenException("Invalid token");
 

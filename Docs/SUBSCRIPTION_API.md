@@ -211,8 +211,8 @@ POST /api/subscription/test-activate?durationDays=7&planType=PremiumYearly
             ▼                                   ▼
 ┌─────────────────────────┐     ┌─────────────────────────────────┐
 │  ⚠️ GIỚI HẠN FEATURES   │     │  ✅ FULL FEATURES                │
-│  - AI: 5 lần/ngày       │     │  - AI: Không giới hạn            │
-│  - Sync: 50 notes       │     │  - Sync: Không giới hạn          │
+│  - AI: 🔒 Khóa (VIP only)│     │  - AI: Không giới hạn            │
+│  - Sync: Max 50 notes   │     │  - Sync: Không giới hạn          │
 │  - Hiện quảng cáo       │     │  - Ẩn quảng cáo                  │
 │  - Show "Nâng cấp VIP"  │     │  - Hiển thị badge 👑             │
 └─────────────────────────┘     └─────────────────────────────────┘
@@ -283,13 +283,13 @@ POST /api/subscription/test-activate?durationDays=7&planType=PremiumYearly
               │                               │
               ▼                               ▼
 ┌─────────────────────────┐     ┌─────────────────────────────────┐
-│  Kiểm tra quota hôm nay │     │  Cho phép dùng AI               │
-│  (5 lần/ngày cho Free)  │     │  không giới hạn                 │
+│  Kiểm tra quyền truy cập│     │  Cho phép dùng AI               │
+│  (Free: Access Denied)  │     │  không giới hạn                 │
 │                         │     │                                  │
-│  Nếu hết quota:         │     │  → Gọi API AI                    │
-│  → Show popup           │     │  → Tạo note                      │
-│    "Nâng cấp VIP để     │     │                                  │
-│     dùng không giới hạn"│     │                                  │
+│  → Show popup           │     │  → Gọi API AI                    │
+│    "Tính năng AI chỉ    │     │  → Tạo note                      │
+│     dành cho VIP"       │     │                                  │
+│                         │     │                                  │
 └─────────────────────────┘     └─────────────────────────────────┘
 ```
 
@@ -383,15 +383,11 @@ void onAiButtonPressed() async {
   final isVip = await subscriptionService.isVip(authToken);
   
   if (isVip) {
-    // VIP user - allow unlimited AI usage
+    // VIP user - allow usage
     await callAiService();
   } else {
-    // Free user - check daily quota
-    if (todayAiUsage >= 5) {
-      showUpgradeDialog();
-    } else {
-      await callAiService();
-    }
+    // Free user - BLOCK access
+    showUpgradeDialog(message: "Chỉ thành viên VIP mới được sử dụng AI!");
   }
 }
 ```

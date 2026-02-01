@@ -56,13 +56,13 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
         ConfigureAiProvider(modelBuilder);
         ConfigureAiModel(modelBuilder);
         ConfigureAiUsageLog(modelBuilder);
-        
+
         // Membership System
         ConfigureUserSubscription(modelBuilder);
         ConfigurePaymentTransaction(modelBuilder);
 
         // Seed data
-        SeedUsers(modelBuilder);
+        // SeedUsers(modelBuilder); // Removed for security
         SeedPlans(modelBuilder);
         SeedAiProviders(modelBuilder);
         SeedAiModels(modelBuilder);
@@ -169,7 +169,7 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
             entity.Property(e => e.ErrorMessage).HasMaxLength(500);
             entity.Property(e => e.ActionType).HasConversion<int>();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
-            
+
             // Index for quota queries: count by UserId and CreatedAt (for daily limits)
             entity.HasIndex(e => new { e.UserId, e.CreatedAt }, "IX_AiUsageLogs_User_CreatedAt");
             // Index for looking up by NoteId
@@ -183,7 +183,7 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
         {
             entity.ToTable("user_subscriptions");
             entity.HasKey(e => e.Id);
-            
+
             entity.Property(e => e.UserId).IsRequired();
             entity.Property(e => e.PlanType).HasConversion<int>().HasDefaultValue(PlanType.Free);
             entity.Property(e => e.Status).HasConversion<int>().HasDefaultValue(SubscriptionStatus.Active);
@@ -191,13 +191,13 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
             entity.Property(e => e.EndDate).IsRequired();
             entity.Property(e => e.IsAutoRenew).HasDefaultValue(false);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
-            
+
             // One-to-One relationship: AppUser has one UserSubscription
             entity.HasOne(e => e.User)
                   .WithOne(u => u.UserSubscription)
                   .HasForeignKey<UserSubscription>(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
-            
+
             entity.HasIndex(e => e.UserId, "IX_UserSubscriptions_UserId").IsUnique();
             entity.HasIndex(e => new { e.UserId, e.Status, e.EndDate }, "IX_UserSubscriptions_User_Active");
         });
@@ -209,7 +209,7 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
         {
             entity.ToTable("payment_transactions");
             entity.HasKey(e => e.Id);
-            
+
             entity.Property(e => e.UserId).IsRequired();
             entity.Property(e => e.Amount).HasColumnType("decimal(18, 2)").IsRequired();
             entity.Property(e => e.Currency).IsRequired().HasMaxLength(10).HasDefaultValue("VND");
@@ -218,13 +218,13 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
             entity.Property(e => e.Status).HasConversion<int>().HasDefaultValue(TransactionStatus.Pending);
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
-            
+
             // One-to-Many relationship: AppUser has many PaymentTransactions
             entity.HasOne(e => e.User)
                   .WithMany(u => u.PaymentTransactions)
                   .HasForeignKey(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
-            
+
             entity.HasIndex(e => e.TransactionCode, "IX_PaymentTransactions_TransactionCode").IsUnique();
             entity.HasIndex(e => e.UserId, "IX_PaymentTransactions_UserId");
             entity.HasIndex(e => new { e.UserId, e.Status }, "IX_PaymentTransactions_User_Status");
@@ -235,6 +235,7 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
 
     #region Data Seeding
 
+    /* 
     private static void SeedUsers(ModelBuilder modelBuilder)
     {
         var hasher = new PasswordHasher<AppUser>();
@@ -253,6 +254,7 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
             }
         );
     }
+    */
 
     private static void SeedPlans(ModelBuilder modelBuilder)
     {

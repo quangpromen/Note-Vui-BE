@@ -99,7 +99,7 @@ builder.Services.AddAuthentication(options =>
 });
 
 // Register IApplicationDbContext interface to resolve to ApplicationDbContext
-builder.Services.AddScoped<IApplicationDbContext>(provider => 
+builder.Services.AddScoped<IApplicationDbContext>(provider =>
     provider.GetRequiredService<ApplicationDbContext>());
 
 // Register Application Services
@@ -118,6 +118,25 @@ builder.Services.AddHttpClient<IAiService, GeminiAiService>(client =>
 });
 
 var app = builder.Build();
+
+// Configure Database and Migrate
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        var context = services.GetRequiredService<ApplicationDbContext>();
+        if ((await context.Database.GetPendingMigrationsAsync()).Any())
+        {
+            await context.Database.MigrateAsync();
+        }
+    }
+    catch (Exception ex)
+    {
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "An error occurred while migrating the database.");
+    }
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

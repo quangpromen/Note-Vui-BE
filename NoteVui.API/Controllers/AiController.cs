@@ -5,6 +5,7 @@ using NoteVui.Application.DTOs.Ai;
 using NoteVui.Application.Interfaces;
 using NoteVui.Domain.Entities;
 using NoteVui.Domain.Enums;
+using NoteVui.Application.Services.Interfaces;
 
 namespace NoteVui.API.Controllers;
 
@@ -22,6 +23,7 @@ public class AiController : ControllerBase
     private readonly ICurrentUserService _currentUserService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<AiController> _logger;
+    private readonly IVipService _vipService;
 
     private const int DEFAULT_DAILY_LIMIT = 20;
 
@@ -30,13 +32,15 @@ public class AiController : ControllerBase
         IApplicationDbContext dbContext,
         ICurrentUserService currentUserService,
         IConfiguration configuration,
-        ILogger<AiController> logger)
+        ILogger<AiController> logger,
+        IVipService vipService)
     {
         _aiService = aiService;
         _dbContext = dbContext;
         _currentUserService = currentUserService;
         _configuration = configuration;
         _logger = logger;
+        _vipService = vipService;
     }
 
     /// <summary>
@@ -51,7 +55,7 @@ public class AiController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Summarize([FromBody] AiRequest request)
     {
-        return await ProcessAiRequestAsync(request, AiActionType.Summarize, 
+        return await ProcessAiRequestAsync(request, AiActionType.Summarize,
             () => _aiService.SummarizeAsync(request.Content));
     }
 
@@ -67,7 +71,7 @@ public class AiController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> FixGrammar([FromBody] AiRequest request)
     {
-        return await ProcessAiRequestAsync(request, AiActionType.FixGrammar, 
+        return await ProcessAiRequestAsync(request, AiActionType.FixGrammar,
             () => _aiService.FixGrammarAsync(request.Content));
     }
 
@@ -88,7 +92,7 @@ public class AiController : ControllerBase
             return BadRequest(new { error = "Target language is required for translation." });
         }
 
-        return await ProcessAiRequestAsync(request, AiActionType.Translate, 
+        return await ProcessAiRequestAsync(request, AiActionType.Translate,
             () => _aiService.TranslateAsync(request.Content, request.TargetLanguage));
     }
 
@@ -104,7 +108,7 @@ public class AiController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> GenerateIdeas([FromBody] AiRequest request)
     {
-        return await ProcessAiRequestAsync(request, AiActionType.GenerateIdeas, 
+        return await ProcessAiRequestAsync(request, AiActionType.GenerateIdeas,
             () => _aiService.GenerateIdeasAsync(request.Content));
     }
 
@@ -123,15 +127,30 @@ public class AiController : ControllerBase
             return Unauthorized();
         }
 
-        var dailyLimit = GetDailyLimit();
-        var usedToday = await GetTodayUsageCountAsync(userId.Value);
-        var remaining = Math.Max(0, dailyLimit - usedToday);
+        var userIdString = _currentUserService.UserId;
+        bool isVip = await _vipService.IsVipAsync(userIdString!);
 
-        return Ok(new 
-        { 
+        int dailyLimit;
+        int remaining;
+        var usedToday = await GetTodayUsageCountAsync(userId.Value);
+
+        if (isVip)
+        {
+            dailyLimit = int.MaxValue; // Unlimited
+            remaining = int.MaxValue;
+        }
+        else
+        {
+            dailyLimit = 0; // Blocked
+            remaining = 0;
+        }
+
+        return Ok(new
+        {
             dailyLimit = dailyLimit,
             usedToday = usedToday,
             remaining = remaining,
+            isVip = isVip,
             resetTime = DateTime.UtcNow.Date.AddDays(1).ToString("O")
         });
     }
@@ -140,8 +159,8 @@ public class AiController : ControllerBase
     /// Processes an AI request with quota checking and logging.
     /// </summary>
     private async Task<IActionResult> ProcessAiRequestAsync(
-        AiRequest request, 
-        AiActionType actionType, 
+        AiRequest request,
+        AiActionType actionType,
         Func<Task<AiResponse>> aiOperation)
     {
         var userId = GetCurrentUserId();
@@ -150,20 +169,26 @@ public class AiController : ControllerBase
             return Unauthorized();
         }
 
-        // Check daily quota BEFORE making the AI call
-        var dailyLimit = GetDailyLimit();
-        var usedToday = await GetTodayUsageCountAsync(userId.Value);
-        
-        if (usedToday >= dailyLimit)
+        var userIdString = _currentUserService.UserId;
+        bool isVip = await _vipService.IsVipAsync(userIdString!);
+
+        // Block non-VIP users (unless they are Admin - handle later if needed, currently just VIP check)
+        // You can add Admin check here like: || User.IsInRole("Admin")
+        if (!isVip)
         {
-            _logger.LogWarning("User {UserId} exceeded daily AI quota ({Limit})", userId, dailyLimit);
-            return StatusCode(StatusCodes.Status402PaymentRequired, new AiResponse
+            _logger.LogWarning("Non-VIP user {UserId} attempted to use AI features", userId);
+            return StatusCode(StatusCodes.Status403Forbidden, new AiResponse
             {
                 IsSuccess = false,
-                ErrorMessage = $"Daily AI quota exceeded. You have used {usedToday}/{dailyLimit} requests today. Quota resets at midnight UTC.",
+                ErrorMessage = "AI features are exclusively available for VIP members. Please upgrade to Premium.",
                 RemainingQuota = 0
             });
         }
+
+        // For VIP users, we don't enforce a daily limit (or use a very high one).
+        // We still track usage for statistics.
+        int usedToday = await GetTodayUsageCountAsync(userId.Value);
+        int dailyLimit = int.MaxValue; // Unlimited for VIP
 
         // Create usage log entry (we log attempts, not just successes)
         var usageLog = new AiUsageLog
@@ -197,7 +222,7 @@ public class AiController : ControllerBase
             _logger.LogError(ex, "AI service configuration error");
             usageLog.IsSuccess = false;
             usageLog.ErrorMessage = "Server configuration error";
-            
+
             return StatusCode(StatusCodes.Status503ServiceUnavailable, AiResponse.Failure(
                 "AI service is currently unavailable. Please try again later."));
         }
@@ -206,7 +231,7 @@ public class AiController : ControllerBase
             _logger.LogError(ex, "Unexpected error in AI controller for user {UserId}", userId);
             usageLog.IsSuccess = false;
             usageLog.ErrorMessage = "Unexpected error";
-            
+
             return StatusCode(StatusCodes.Status500InternalServerError, AiResponse.Failure(
                 "An unexpected error occurred. Please try again later."));
         }
@@ -235,8 +260,8 @@ public class AiController : ControllerBase
         var todayEnd = todayStart.AddDays(1);
 
         return await _dbContext.AiUsageLogs
-            .Where(log => log.UserId == userId 
-                       && log.CreatedAt >= todayStart 
+            .Where(log => log.UserId == userId
+                       && log.CreatedAt >= todayStart
                        && log.CreatedAt < todayEnd)
             .CountAsync();
     }

@@ -10,4 +10,5 @@ public interface IIdentityService
     // Extra methods for features
     Task ChangePasswordAsync(string userId, ChangePasswordRequest request);
     Task UpdateProfileAsync(string userId, UpdateProfileRequest request);
+    Task RevokeTokenAsync(string userId);
 }
