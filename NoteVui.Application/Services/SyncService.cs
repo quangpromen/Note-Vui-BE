@@ -3,6 +3,8 @@ using NoteVui.Application.DTOs.Sync;
 using NoteVui.Application.Interfaces;
 using NoteVui.Application.Services.Interfaces;
 using NoteVui.Domain.Entities;
+using NoteVui.Application.Exceptions;
+using NoteVui.Domain.Entities.Membership;
 
 namespace NoteVui.Application.Services;
 
@@ -34,8 +36,15 @@ public class SyncService : ISyncService
         // PUSH: Process client changes
         await ProcessPushAsync(userId, request.Changes, stats);
 
+        // Collect ClientIds that were just pushed (to exclude them from Pull)
+        var clientIdsToExclude = request.Changes
+            .Where(c => c.ClientId != Guid.Empty)
+            .Select(c => c.ClientId)
+            .ToList();
+
         // PULL: Get server changes since last sync
-        var serverChanges = await GetPullChangesAsync(userId, request.LastSyncTime);
+        // Pass clientIdsToExclude so we don't send back what the client just sent us
+        var serverChanges = await GetPullChangesAsync(userId, request.LastSyncTime, clientIdsToExclude);
         stats.ServerChangesReturned = serverChanges.Count;
 
         return new SyncResponse
@@ -55,9 +64,15 @@ public class SyncService : ISyncService
         if (clientChanges.Count == 0)
             return;
 
-        // Get all ClientIds from the request
-        var clientIds = clientChanges
+        // Deduplicate changes: keep only the latest change for each ClientId
+        var processedChanges = clientChanges
             .Where(c => c.ClientId != Guid.Empty)
+            .GroupBy(c => c.ClientId)
+            .Select(g => g.OrderByDescending(x => x.UpdatedAt).First())
+            .ToList();
+
+        // Get all ClientIds from the processed changes
+        var clientIds = processedChanges
             .Select(c => c.ClientId)
             .ToList();
 
@@ -67,15 +82,18 @@ public class SyncService : ISyncService
             .Where(n => n.UserId == userId && clientIds.Contains(n.ClientId))
             .ToDictionaryAsync(n => n.ClientId);
 
-        foreach (var clientNote in clientChanges)
-        {
-            // Validate ClientId
-            if (clientNote.ClientId == Guid.Empty)
-            {
-                // Skip invalid entries
-                continue;
-            }
+        // Check limit for new insertions AND un-deletions (restoring deleted notes)
+        var newNotesCount = processedChanges.Count(c =>
+            !c.IsDeleted &&
+            (!existingNotes.TryGetValue(c.ClientId, out var serverNote) || serverNote.IsDeleted));
 
+        if (newNotesCount > 0)
+        {
+            await CheckNoteLimitAsync(userId, newNotesCount);
+        }
+
+        foreach (var clientNote in processedChanges)
+        {
             if (existingNotes.TryGetValue(clientNote.ClientId, out var serverNote))
             {
                 // Case B: Note exists - apply "Last Write Wins"
@@ -107,7 +125,7 @@ public class SyncService : ISyncService
     /// Gets server changes since last sync (PULL operation).
     /// Includes deleted notes so clients can remove them locally.
     /// </summary>
-    private async Task<List<NoteSyncDto>> GetPullChangesAsync(string userId, DateTime? lastSyncTime)
+    private async Task<List<NoteSyncDto>> GetPullChangesAsync(string userId, DateTime? lastSyncTime, List<Guid>? excludeClientIds = null)
     {
         var query = _context.Notes
             .AsNoTracking()
@@ -119,6 +137,12 @@ public class SyncService : ISyncService
         if (lastSyncTime.HasValue)
         {
             query = query.Where(n => n.UpdatedAt > lastSyncTime.Value);
+        }
+
+        // Exclude notes that were just pushed by the client (to save bandwidth)
+        if (excludeClientIds != null && excludeClientIds.Any())
+        {
+            query = query.Where(n => !excludeClientIds.Contains(n.ClientId));
         }
 
         // IMPORTANT: Do NOT filter out IsDeleted - we need to send deleted notes
@@ -206,6 +230,37 @@ public class SyncService : ISyncService
             CreatedAt = note.CreatedAt ?? DateTime.UtcNow,
             UpdatedAt = note.UpdatedAt ?? DateTime.UtcNow
         };
+    }
+
+    /// <summary>
+    /// Checks if adding new notes would exceed the user's limit based on their subscription.
+    /// </summary>
+    private async Task CheckNoteLimitAsync(string userId, int incomingNewNotesCount)
+    {
+        // 1. Check if user is VIP
+        var subscription = await _context.UserSubscriptions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.UserId == userId);
+
+        bool isVip = subscription != null &&
+                     subscription.PlanType != PlanType.Free &&
+                     subscription.Status == SubscriptionStatus.Active &&
+                     subscription.EndDate > DateTime.UtcNow;
+
+        if (isVip)
+        {
+            return; // Unlimited for VIP
+        }
+
+        // 2. Count existing active notes (Free tier limit)
+        var currentNoteCount = await _context.Notes
+            .Where(n => n.UserId == userId && !n.IsDeleted)
+            .CountAsync();
+
+        if (currentNoteCount + incomingNewNotesCount > 50)
+        {
+            throw new NoteLimitExceededException("Bạn đã đạt giới hạn 50 ghi chú. Vui lòng nâng cấp VIP để lưu trữ thêm.");
+        }
     }
 
     /// <summary>

@@ -1,0 +1,12 @@
+# BEHAVIOR GUIDELINES
+Always strict adherence to the following skills located in .agent/skills:
+
+1. **dotnet-backend-patterns**: Use specific patterns for .NET 8, Dependency Injection, and Options Pattern for configuration.
+2. **csharp-pro**: Use advanced C# features where appropriate (e.g., Primary Constructors, Global Usings, File-scoped Namespaces).
+3. **clean-code**: Follow naming conventions, SOLID principles, DRY (Don't Repeat Yourself), and write meaningful code comments.
+4. **api-design-principles**: Ensure RESTful naming conventions, use proper HTTP status codes, and maintain consistent Response formats.
+
+# PROJECT CONTEXT
+- **Framework**: .NET 8 Web API
+- **Architecture**: Clean Architecture (Domain, Application, Infrastructure, API)
+- **Database**: SQL Server with Entity Framework Core Identity

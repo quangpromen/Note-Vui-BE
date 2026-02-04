@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NoteVui.Application.DTOs.Sync;
 using NoteVui.Application.Services.Interfaces;
+using NoteVui.Application.Exceptions;
 
 namespace NoteVui.API.Controllers;
 
@@ -81,6 +82,10 @@ public class SyncController : ControllerBase
 
             return Ok(response);
         }
+        catch (NoteLimitExceededException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
         catch (UnauthorizedAccessException)
         {
             return Unauthorized(new { message = "User is not authenticated." });
@@ -88,7 +93,7 @@ public class SyncController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during sync operation");
-            return StatusCode(StatusCodes.Status500InternalServerError, 
+            return StatusCode(StatusCodes.Status500InternalServerError,
                 new { message = "An error occurred during synchronization." });
         }
     }
