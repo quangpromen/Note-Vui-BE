@@ -33,7 +33,9 @@ Tài liệu này mô tả các quy tắc nghiệp vụ (Business Rules) hiện �
 - **API Endpoint**: `/api/sync`
 - **Cơ chế kiểm soát**: 
   - Khi Client gửi request `PUSH` (đẩy dữ liệu lên), hệ thống đếm tổng số Notes hiện tại trong DB.
-  - Nếu `(Tổng hiện tại + Số Note mới) > 50` VÀ User là Free -> Chặn Insert, trả về lỗi `402 Payment Required`.
+  - **Cơ chế chống trùng lặp**: Nếu request chứa nhiều thay đổi cho cùng một `ClientId` (do lỗi mobile/retry), hệ thống sẽ gộp nhóm và chỉ xử lý bản ghi có `UpdatedAt` mới nhất.
+  - Nếu `(Tổng hiện tại + Số Note mới) > 50` VÀ User là Free -> Chặn Insert/Restore, trả về lỗi `403 Forbidden`.
+  - Message bắt buộc: *"Bạn đã đạt giới hạn 50 ghi chú. Vui lòng nâng cấp VIP để lưu trữ thêm."*
 
 ---
 
@@ -54,4 +56,4 @@ Tài liệu này mô tả các quy tắc nghiệp vụ (Business Rules) hiện �
 ---
 
 *Tài liệu được cập nhật tự động theo mã nguồn hiện tại.*
-*Last updated: 2026-02-01*
+*Last updated: 2026-02-03*
