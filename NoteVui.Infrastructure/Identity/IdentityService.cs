@@ -137,6 +137,14 @@ public class IdentityService : IIdentityService
             new Claim("FullName", user.FullName)
         };
 
+        // Đọc roles của user từ database và thêm vào token
+        // Không phải hardcode - lấy từ bảng AspNetUserRoles trong DB
+        var userRoles = await _userManager.GetRolesAsync(user);
+        foreach (var role in userRoles)
+        {
+            authClaims.Add(new Claim(ClaimTypes.Role, role));
+        }
+
         var secretKey = _configuration["JwtSettings:Key"];
         if (string.IsNullOrEmpty(secretKey)) throw new Exception("JWT Key is missing in configuration");
 

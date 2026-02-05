@@ -108,6 +108,7 @@ builder.Services.AddScoped<ISyncService, SyncService>();
 builder.Services.AddScoped<IIdentityService, IdentityService>();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IVipService, VipService>();
+builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddHttpContextAccessor();
 
 // Register AI Service with HttpClient
