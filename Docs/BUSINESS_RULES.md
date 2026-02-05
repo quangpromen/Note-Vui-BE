@@ -55,5 +55,20 @@ Tài liệu này mô tả các quy tắc nghiệp vụ (Business Rules) hiện �
 
 ---
 
+## 4. 🛠 Quản trị hệ thống (Admin Management)
+
+> **Quy tắc cốt lõi (Core Rule):** Chỉ người dùng có Role `Admin` mới có quyền truy cập module quản trị.
+
+### 4.1. Quyền hạn của Admin
+- Xem báo cáo doanh thu và chỉ số tăng trưởng người dùng.
+- Tra cứu danh sách người dùng và trạng thái gói cước (VIP/Free).
+- **Khóa tài khoản (Lockout)**: Có quyền khóa hoặc mở khóa bất kỳ tài khoản nào nếu vi phạm quy định.
+
+### 4.2. Cơ chế bảo mật
+- Mọi yêu cầu Admin đều được kiểm tra Role thông qua JWT Token.
+- Role `Admin` được cấu hình trực tiếp trong Database (bảng Roles).
+
+---
+
 *Tài liệu được cập nhật tự động theo mã nguồn hiện tại.*
-*Last updated: 2026-02-03*
+*Last updated: 2026-02-05*
