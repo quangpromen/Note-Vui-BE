@@ -88,4 +88,80 @@ public class AdminController : ControllerBase
 
         return Ok(new { success = true, message });
     }
+
+    /// <summary>
+    /// Gets the subscription information for a specific user.
+    /// </summary>
+    /// <param name="id">The user's ID.</param>
+    /// <returns>User subscription information.</returns>
+    [HttpGet("users/{id}/subscription")]
+    [ProducesResponseType(typeof(UserSubscriptionDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetUserSubscription(string id)
+    {
+        var result = await _adminService.GetUserSubscriptionAsync(id);
+
+        if (result == null)
+        {
+            return NotFound(new { message = "Không tìm thấy người dùng." });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Sets or updates the subscription for a user (activate/modify VIP).
+    /// </summary>
+    /// <param name="id">The user's ID.</param>
+    /// <param name="request">The subscription settings.</param>
+    /// <returns>Updated subscription information.</returns>
+    /// <remarks>
+    /// PlanType values:
+    /// - 0: Free
+    /// - 1: PremiumMonthly
+    /// - 2: PremiumYearly
+    /// 
+    /// If EndDate is not provided, it will be calculated based on PlanType:
+    /// - Free: 100 years from now
+    /// - PremiumMonthly: 1 month from now
+    /// - PremiumYearly: 1 year from now
+    /// </remarks>
+    [HttpPut("users/{id}/subscription")]
+    [ProducesResponseType(typeof(UserSubscriptionDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SetUserSubscription(string id, [FromBody] SetUserSubscriptionRequest request)
+    {
+        // Validate PlanType
+        if (request.PlanType < 0 || request.PlanType > 2)
+        {
+            return BadRequest(new { message = "PlanType không hợp lệ. Giá trị hợp lệ: 0 (Free), 1 (PremiumMonthly), 2 (PremiumYearly)." });
+        }
+
+        var result = await _adminService.SetUserSubscriptionAsync(id, request);
+
+        if (result == null)
+        {
+            return NotFound(new { message = "Không tìm thấy người dùng." });
+        }
+
+        var planName = request.PlanType switch
+        {
+            0 => "Free",
+            1 => "Premium (Tháng)",
+            2 => "Premium (Năm)",
+            _ => "Unknown"
+        };
+
+        return Ok(new
+        {
+            success = true,
+            message = $"Đã cập nhật gói {planName} cho người dùng thành công.",
+            data = result
+        });
+    }
 }
