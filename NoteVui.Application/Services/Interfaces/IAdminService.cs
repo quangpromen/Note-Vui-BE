@@ -31,4 +31,19 @@ public interface IAdminService
     /// <param name="isLock">True to lock the user, false to unlock.</param>
     /// <returns>True if the operation succeeded, false otherwise.</returns>
     Task<bool> LockUserAsync(string userId, bool isLock);
+
+    /// <summary>
+    /// Gets the subscription information for a specific user.
+    /// </summary>
+    /// <param name="userId">The user's ID.</param>
+    /// <returns>User subscription DTO or null if user not found.</returns>
+    Task<UserSubscriptionDto?> GetUserSubscriptionAsync(string userId);
+
+    /// <summary>
+    /// Sets or creates a subscription for a user (activate VIP).
+    /// </summary>
+    /// <param name="userId">The user's ID.</param>
+    /// <param name="request">The subscription settings.</param>
+    /// <returns>The updated subscription DTO or null if user not found.</returns>
+    Task<UserSubscriptionDto?> SetUserSubscriptionAsync(string userId, SetUserSubscriptionRequest request);
 }
