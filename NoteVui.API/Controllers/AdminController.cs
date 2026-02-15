@@ -164,4 +164,69 @@ public class AdminController : ControllerBase
             data = result
         });
     }
+
+    /// <summary>
+    /// Gets detailed information for a specific user.
+    /// Includes: user info, subscription, notes stats, AI usage, and account status.
+    /// </summary>
+    /// <param name="id">The user's ID.</param>
+    /// <returns>Detailed user information.</returns>
+    [HttpGet("users/{id}/detail")]
+    [ProducesResponseType(typeof(AdminUserDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetUserDetail(string id)
+    {
+        var result = await _adminService.GetUserDetailAsync(id);
+
+        if (result == null)
+        {
+            return NotFound(new { message = "Không tìm thấy người dùng." });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Edits a user's profile information (FullName, Email, AvatarUrl).
+    /// Admin can change user's email - something users cannot do themselves.
+    /// </summary>
+    /// <param name="id">The user's ID.</param>
+    /// <param name="request">The profile edit data.</param>
+    /// <returns>Updated detailed user information.</returns>
+    [HttpPut("users/{id}/profile")]
+    [ProducesResponseType(typeof(AdminUserDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> EditUserProfile(string id, [FromBody] AdminEditUserRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            var result = await _adminService.EditUserProfileAsync(id, request);
+
+            if (result == null)
+            {
+                return NotFound(new { message = "Không tìm thấy người dùng." });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = "Đã cập nhật thông tin người dùng thành công.",
+                data = result
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }

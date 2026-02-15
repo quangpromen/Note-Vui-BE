@@ -46,4 +46,19 @@ public interface IAdminService
     /// <param name="request">The subscription settings.</param>
     /// <returns>The updated subscription DTO or null if user not found.</returns>
     Task<UserSubscriptionDto?> SetUserSubscriptionAsync(string userId, SetUserSubscriptionRequest request);
+
+    /// <summary>
+    /// Gets detailed information for a specific user including all stats.
+    /// </summary>
+    /// <param name="userId">The user's ID.</param>
+    /// <returns>Detailed user information or null if user not found.</returns>
+    Task<AdminUserDetailDto?> GetUserDetailAsync(string userId);
+
+    /// <summary>
+    /// Edits a user's profile information (FullName, Email, AvatarUrl).
+    /// </summary>
+    /// <param name="userId">The user's ID.</param>
+    /// <param name="request">The edit request.</param>
+    /// <returns>Updated user detail or null if user not found.</returns>
+    Task<AdminUserDetailDto?> EditUserProfileAsync(string userId, AdminEditUserRequest request);
 }
