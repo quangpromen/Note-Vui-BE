@@ -299,4 +299,162 @@ public class AdminService : IAdminService
                        subscription.PlanType != PlanType.Free
         };
     }
+
+    /// <inheritdoc />
+    public async Task<AdminUserDetailDto?> GetUserDetailAsync(string userId)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user == null)
+        {
+            return null;
+        }
+
+        var now = DateTime.UtcNow;
+        var nowOffset = DateTimeOffset.UtcNow;
+
+        // Subscription info
+        var subscription = await _context.UserSubscriptions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.UserId == userId);
+
+        bool isVip = subscription != null
+            && subscription.Status == SubscriptionStatus.Active
+            && subscription.EndDate > now
+            && subscription.PlanType != PlanType.Free;
+
+        // Notes stats
+        var totalNotes = await _context.Notes.AsNoTracking().CountAsync(n => n.UserId == userId);
+        var activeNotes = await _context.Notes.AsNoTracking().CountAsync(n => n.UserId == userId && !n.IsDeleted);
+        var deletedNotes = await _context.Notes.AsNoTracking().CountAsync(n => n.UserId == userId && n.IsDeleted);
+        var pinnedNotes = await _context.Notes.AsNoTracking().CountAsync(n => n.UserId == userId && n.IsPinned && !n.IsDeleted);
+
+        // AI usage stats
+        var todayStart = now.Date;
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var yearStart = new DateTime(now.Year, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        int usedToday = 0, usedThisMonth = 0, usedThisYear = 0, totalUsed = 0;
+
+        if (Guid.TryParse(userId, out var userGuid))
+        {
+            var aiQuery = _context.AiUsageLogs.AsNoTracking().Where(l => l.UserId == userGuid);
+            usedToday = await aiQuery.CountAsync(l => l.CreatedAt >= todayStart);
+            usedThisMonth = await aiQuery.CountAsync(l => l.CreatedAt >= monthStart);
+            usedThisYear = await aiQuery.CountAsync(l => l.CreatedAt >= yearStart);
+            totalUsed = await aiQuery.CountAsync();
+        }
+
+        return new AdminUserDetailDto
+        {
+            UserId = userId,
+            Email = user.Email ?? string.Empty,
+            FullName = user.FullName,
+            AvatarUrl = user.AvatarUrl,
+            IsLocked = user.LockoutEnd.HasValue && user.LockoutEnd > nowOffset,
+            LockoutEnd = user.LockoutEnd,
+
+            Subscription = BuildAdminSubscriptionInfo(subscription, isVip),
+
+            TotalNotes = totalNotes,
+            ActiveNotes = activeNotes,
+            DeletedNotes = deletedNotes,
+            PinnedNotes = pinnedNotes,
+
+            AiUsage = new AdminAiUsageStats
+            {
+                UsedToday = usedToday,
+                UsedThisMonth = usedThisMonth,
+                UsedThisYear = usedThisYear,
+                TotalUsed = totalUsed
+            }
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<AdminUserDetailDto?> EditUserProfileAsync(string userId, AdminEditUserRequest request)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user == null)
+        {
+            return null;
+        }
+
+        // Update FullName
+        user.FullName = request.FullName;
+
+        // Update AvatarUrl
+        user.AvatarUrl = request.AvatarUrl;
+
+        // Update Email (also update UserName since Identity uses UserName = Email)
+        if (!string.IsNullOrEmpty(request.Email) && request.Email != user.Email)
+        {
+            // Check if new email is already taken
+            var existingUser = await _userManager.FindByEmailAsync(request.Email);
+            if (existingUser != null && existingUser.Id != userId)
+            {
+                throw new InvalidOperationException("Email đã được sử dụng bởi tài khoản khác.");
+            }
+
+            user.Email = request.Email;
+            user.NormalizedEmail = request.Email.ToUpperInvariant();
+            user.UserName = request.Email;
+            user.NormalizedUserName = request.Email.ToUpperInvariant();
+        }
+
+        await _userManager.UpdateAsync(user);
+
+        // Return updated detail
+        return await GetUserDetailAsync(userId);
+    }
+
+    /// <summary>
+    /// Builds subscription info for admin detail view.
+    /// </summary>
+    private static AdminUserSubscriptionInfo BuildAdminSubscriptionInfo(UserSubscription? subscription, bool isVip)
+    {
+        if (subscription == null)
+        {
+            return new AdminUserSubscriptionInfo
+            {
+                SubscriptionId = null,
+                PlanName = "Free",
+                PlanType = "Free",
+                PlanTypeValue = 0,
+                IsVip = false,
+                Status = null,
+                StartDate = null,
+                EndDate = null,
+                DaysRemaining = null,
+                IsAutoRenew = false
+            };
+        }
+
+        var planName = subscription.PlanType switch
+        {
+            PlanType.Free => "Free",
+            PlanType.PremiumMonthly => "Premium (Tháng)",
+            PlanType.PremiumYearly => "Premium (Năm)",
+            _ => "Free"
+        };
+
+        int? daysRemaining = null;
+        if (isVip && subscription.EndDate > DateTime.UtcNow)
+        {
+            daysRemaining = (int)(subscription.EndDate - DateTime.UtcNow).TotalDays;
+        }
+
+        return new AdminUserSubscriptionInfo
+        {
+            SubscriptionId = subscription.Id,
+            PlanName = planName,
+            PlanType = subscription.PlanType.ToString(),
+            PlanTypeValue = (int)subscription.PlanType,
+            IsVip = isVip,
+            Status = subscription.Status.ToString(),
+            StartDate = subscription.StartDate,
+            EndDate = subscription.EndDate,
+            DaysRemaining = daysRemaining,
+            IsAutoRenew = subscription.IsAutoRenew
+        };
+    }
 }

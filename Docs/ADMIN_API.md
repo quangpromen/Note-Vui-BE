@@ -149,6 +149,91 @@ Danh sách người dùng hỗ trợ tìm kiếm và phân trang theo chuẩn Se
 }
 ```
 
+### 2.6. Xem chi tiết người dùng (User Detail)
+Xem toàn bộ thông tin chi tiết của một user, bao gồm subscription, notes stats, AI usage, và trạng thái tài khoản.
+
+- **Endpoint**: `GET /api/admin/users/{id}/detail`
+- **Visual Mapping**: Trang chi tiết user hoặc Modal lớn khi click vào user trong bảng.
+- **Success Response (200 OK)**:
+```json
+{
+  "userId": "user-guid-string",
+  "email": "user@example.com",
+  "fullName": "Nguyễn Văn A",
+  "avatarUrl": "https://image-url.com/avatar.jpg",
+  "isLocked": false,
+  "lockoutEnd": null,
+  "subscription": {
+    "subscriptionId": 1,
+    "planName": "Premium (Tháng)",
+    "planType": "PremiumMonthly",
+    "planTypeValue": 1,
+    "isVip": true,
+    "status": "Active",
+    "startDate": "2024-02-01T10:00:00Z",
+    "endDate": "2024-03-01T10:00:00Z",
+    "daysRemaining": 22,
+    "isAutoRenew": false
+  },
+  "totalNotes": 50,
+  "activeNotes": 42,
+  "deletedNotes": 8,
+  "pinnedNotes": 5,
+  "aiUsage": {
+    "usedToday": 3,
+    "usedThisMonth": 28,
+    "usedThisYear": 95,
+    "totalUsed": 95
+  }
+}
+```
+
+### 2.7. Sửa thông tin người dùng (Edit User Profile)
+Admin có thể sửa FullName, Email, AvatarUrl của user. Admin có quyền đổi email - quyền mà user thường không có.
+
+- **Endpoint**: `PUT /api/admin/users/{id}/profile`
+- **Visual Mapping**: Form Modal chỉnh sửa thông tin.
+- **Request Body**:
+```json
+{
+  "fullName": "Nguyễn Văn B",
+  "email": "newemail@example.com",
+  "avatarUrl": "https://image-url.com/avatar.jpg"
+}
+```
+- **Request Validation**:
+  - `fullName`: Required, max 100 ký tự
+  - `email`: Required, phải đúng định dạng email
+  - `avatarUrl`: Optional (nullable)
+
+- **Success Response (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Đã cập nhật thông tin người dùng thành công.",
+  "data": {
+    "userId": "user-guid-string",
+    "email": "newemail@example.com",
+    "fullName": "Nguyễn Văn B",
+    "avatarUrl": "https://image-url.com/avatar.jpg",
+    "isLocked": false,
+    "lockoutEnd": null,
+    "subscription": { ... },
+    "totalNotes": 50,
+    "activeNotes": 42,
+    "deletedNotes": 8,
+    "pinnedNotes": 5,
+    "aiUsage": { ... }
+  }
+}
+```
+- **Error Response (400 Bad Request)** - Email trùng:
+```json
+{
+  "message": "Email đã được sử dụng bởi tài khoản khác."
+}
+```
+
 ---
 
 ## 3. Cấu trúc Schema DTO (Data Models)
@@ -192,6 +277,43 @@ Danh sách người dùng hỗ trợ tìm kiếm và phân trang theo chuẩn Se
 | `isAutoRenew` | `bool` | Có tự động gia hạn không |
 | `isActive` | `bool` | Subscription có đang hoạt động (Premium + Chưa hết hạn) |
 
+### AdminUserDetailDto (MỚI)
+| Trường | Kiểu dữ liệu | Mô tả |
+| :--- | :--- | :--- |
+| `userId` | `string` | ID duy nhất |
+| `email` | `string` | Địa chỉ email |
+| `fullName` | `string` | Tên đầy đủ |
+| `avatarUrl` | `string?` | URL avatar (nullable) |
+| `isLocked` | `bool` | Tài khoản đang bị khóa |
+| `lockoutEnd` | `DateTimeOffset?` | Thời điểm hết khóa |
+| `subscription` | `AdminUserSubscriptionInfo` | Thông tin gói (xem bảng dưới) |
+| `totalNotes` | `int` | Tổng notes (gồm đã xóa) |
+| `activeNotes` | `int` | Notes đang hoạt động |
+| `deletedNotes` | `int` | Notes trong thùng rác |
+| `pinnedNotes` | `int` | Notes đã ghim |
+| `aiUsage` | `AdminAiUsageStats` | Thống kê AI usage |
+
+### AdminUserSubscriptionInfo
+| Trường | Kiểu dữ liệu | Mô tả |
+| :--- | :--- | :--- |
+| `subscriptionId` | `int?` | ID subscription (null nếu Free) |
+| `planName` | `string` | "Free", "Premium (Tháng)", "Premium (Năm)" |
+| `planType` | `string` | "Free", "PremiumMonthly", "PremiumYearly" |
+| `planTypeValue` | `int` | 0, 1, 2 - dùng cho dropdown select |
+| `isVip` | `bool` | Đang có gói premium hoạt động |
+| `status` | `string?` | "Active", "Cancelled", "Expired" |
+| `startDate` | `DateTime?` | Ngày bắt đầu |
+| `endDate` | `DateTime?` | Ngày hết hạn |
+| `daysRemaining` | `int?` | Số ngày còn lại |
+| `isAutoRenew` | `bool` | Tự động gia hạn |
+
+### AdminEditUserRequest (MỚI)
+| Trường | Kiểu dữ liệu | Mô tả |
+| :--- | :--- | :--- |
+| `fullName` | `string` | Required, max 100 ký tự |
+| `email` | `string` | Required, định dạng email |
+| `avatarUrl` | `string?` | Optional (nullable) |
+
 ---
 
 ## 4. Giao thức Kỹ thuật (Technical Nuances)
@@ -200,6 +322,7 @@ Danh sách người dùng hỗ trợ tìm kiếm và phân trang theo chuẩn Se
 - **Search**: Case-insensitive, tìm kiếm theo Email hoặc FullName.
 - **Locking Indefinitely**: Khi khóa một user, hệ thống đặt `LockoutEnd` lên mức tối đa (`9999-12-31`).
 - **Revenue Calculation**: Chỉ tính từ các giao dịch có trạng thái `Success`.
+- **Email Change**: Chỉ Admin mới có quyền đổi email cho user. User thường chỉ đổi được FullName và AvatarUrl.
 
 ---
 
@@ -215,6 +338,8 @@ Nếu bạn sử dụng AI để tạo Front-end, hãy cung cấp các yêu cầ
    - Topbar: Hiển thị Profile Admin và nút Logout.
    - Dashboard: Grid 4 cột cho Stats, kèm theo biểu đồ (nếu cần).
    - User List: Table với Search, Filter Plan, và nút Lock/Unlock táo bạo.
+   - User Detail: Trang/Modal chi tiết với tabs (Info, Subscription, Stats).
+   - Edit User: Form Modal cho Admin sửa thông tin user.
 
 ---
 
@@ -227,9 +352,11 @@ Nếu bạn sử dụng AI để tạo Front-end, hãy cung cấp các yêu cầ
 > 2. Trang Quản lý User có bảng dữ liệu hỗ trợ phân trang và tìm kiếm.
 > 3. Cột 'Trạng thái' trong bảng User hiển thị Badge cho Plan (Free/Premium).
 > 4. Có nút 'Khóa/Mở khóa' người dùng bằng Dialog xác nhận.
-> 5. Sử dụng Axios để gọi API và quản lý state bằng React Query.
-> 6. Code sạch, chia component rõ ràng (StatsCard, UserTable, Layout, Sidebar).
-> 7. Tông màu chủ đạo: Slate & Indigo đậm chất SaaS."
+> 5. Click vào row user mở trang/modal chi tiết hiển thị đầy đủ thông tin (notes stats, AI usage, subscription).
+> 6. Có form edit thông tin user (FullName, Email, Avatar) cho Admin.
+> 7. Sử dụng Axios để gọi API và quản lý state bằng React Query.
+> 8. Code sạch, chia component rõ ràng (StatsCard, UserTable, UserDetail, Layout, Sidebar).
+> 9. Tông màu chủ đạo: Slate & Indigo đậm chất SaaS."
 
 ---
-*Cập nhật lần cuối: 07/02/2026*
+*Cập nhật lần cuối: 14/02/2026*
