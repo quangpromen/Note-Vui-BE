@@ -17,6 +17,26 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+// 1. Thêm dịch vụ CORS
+builder.Services.AddCors(options =>
+{
+    // Cấu hình cho môi trường Dev (Cho phép tất cả)
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+
+    // Cấu hình cho môi trường Production (Chỉ cho phép domain cụ thể)
+    // Ví dụ: chỉ cho phép Web Admin và Mobile App gọi vào
+    options.AddPolicy("ProductionLimit", policy =>
+    {
+        policy.WithOrigins("https://admin.notevui.com", "http://localhost:5100") // Thay bằng domain thật của bạn
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -148,6 +168,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseCors("AllowAll");
 
 app.UseAuthentication();
 app.UseAuthorization();

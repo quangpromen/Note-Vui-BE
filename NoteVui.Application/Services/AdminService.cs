@@ -407,6 +407,38 @@ public class AdminService : IAdminService
         return await GetUserDetailAsync(userId);
     }
 
+    /// <inheritdoc />
+    public async Task<AdminUserDetailDto> CreateUserAsync(AdminCreateUserRequest request)
+    {
+        var existingUser = await _userManager.FindByEmailAsync(request.Email);
+
+        // If a user with the same email already exists, just return the existing user
+        if (existingUser != null)
+        {
+            var detail = await GetUserDetailAsync(existingUser.Id);
+            return detail ?? throw new InvalidOperationException("Lỗi: Không thể lấy thông tin người dùng đã tồn tại.");
+        }
+
+        var user = new AppUser
+        {
+            UserName = request.Email,
+            Email = request.Email,
+            FullName = request.FullName,
+            AvatarUrl = request.AvatarUrl
+        };
+
+        var result = await _userManager.CreateAsync(user, request.Password);
+
+        if (!result.Succeeded)
+        {
+            var errors = string.Join("; ", result.Errors.Select(e => e.Description));
+            throw new InvalidOperationException($"Lỗi tạo người dùng: {errors}");
+        }
+
+        var newDetail = await GetUserDetailAsync(user.Id);
+        return newDetail ?? throw new InvalidOperationException("Lỗi: Không thể lấy thông tin người dùng vừa tạo.");
+    }
+
     /// <summary>
     /// Builds subscription info for admin detail view.
     /// </summary>

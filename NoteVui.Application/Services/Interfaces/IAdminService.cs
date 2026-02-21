@@ -61,4 +61,12 @@ public interface IAdminService
     /// <param name="request">The edit request.</param>
     /// <returns>Updated user detail or null if user not found.</returns>
     Task<AdminUserDetailDto?> EditUserProfileAsync(string userId, AdminEditUserRequest request);
+
+    /// <summary>
+    /// Creates a new user. If a user with the same email already exists, 
+    /// returns the existing user details seamlessly without creating a duplicate.
+    /// </summary>
+    /// <param name="request">The create user request data.</param>
+    /// <returns>The created or existing user details.</returns>
+    Task<AdminUserDetailDto> CreateUserAsync(AdminCreateUserRequest request);
 }

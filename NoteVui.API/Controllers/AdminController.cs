@@ -229,4 +229,39 @@ public class AdminController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Creates a new user by Admin. If the email already exists, 
+    /// returns the existing user details without creating a duplicate.
+    /// </summary>
+    /// <param name="request">The create user request data.</param>
+    /// <returns>The created or existing detailed user information.</returns>
+    [HttpPost("users")]
+    [ProducesResponseType(typeof(AdminUserDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> CreateUser([FromBody] AdminCreateUserRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            var result = await _adminService.CreateUserAsync(request);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Xử lý người dùng thành công.",
+                data = result
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }
