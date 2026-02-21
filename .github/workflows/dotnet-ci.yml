@@ -1,0 +1,31 @@
+name: .NET CI Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET 8.x
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Restore dependencies
+      run: dotnet restore NoteVui.sln
+
+    - name: Build
+      run: dotnet build NoteVui.sln --configuration Release --no-restore
+
+    # Hiện tại chưa có project Test trong mã nguồn. 
+    # Nếu trong tương lai có thêm Unit Test, bạn có thể bỏ comment đoạn dưới đây:
+    # - name: Test
+    #   run: dotnet test NoteVui.sln --configuration Release --no-build --verbosity normal
