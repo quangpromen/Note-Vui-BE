@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using NoteVui.Application.DTOs.Settings;
 using NoteVui.Application.Interfaces;
 using NoteVui.Application.Services;
 using NoteVui.Application.Services.Interfaces;
@@ -131,6 +132,10 @@ builder.Services.AddScoped<IVipService, VipService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>();
 builder.Services.AddHttpContextAccessor();
+
+// Email Service Configuration
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
+builder.Services.AddScoped<IMailService, MailService>();
 
 // Register AI Service with HttpClient
 builder.Services.AddHttpClient<IAiService, GeminiAiService>(client =>
