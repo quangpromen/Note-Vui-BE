@@ -17,11 +17,13 @@ public class AdminService : IAdminService
 {
     private readonly IApplicationDbContext _context;
     private readonly UserManager<AppUser> _userManager;
+    private readonly IMailService _mailService;
 
-    public AdminService(IApplicationDbContext context, UserManager<AppUser> userManager)
+    public AdminService(IApplicationDbContext context, UserManager<AppUser> userManager, IMailService mailService)
     {
         _context = context;
         _userManager = userManager;
+        _mailService = mailService;
     }
 
     /// <inheritdoc />
@@ -282,6 +284,61 @@ public class AdminService : IAdminService
         }
 
         await _context.SaveChangesAsync();
+
+        // Send email notification if user is granted or extended a Premium plan
+        if (planType != PlanType.Free && user.Email != null)
+        {
+            var planNameStr = planType switch
+            {
+                PlanType.PremiumMonthly => "Premium (Gói 1 Tháng)",
+                PlanType.PremiumYearly => "Premium (Gói 1 Năm)",
+                _ => "Premium VIP"
+            };
+
+            var emailSubject = "🎉 Chúc mừng! Tài khoản của bạn đã được nâng cấp lên VIP - NoteVui";
+            var emailBody = $@"
+                <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;'>
+                    <div style='background-color: #4CAF50; padding: 20px; text-align: center; color: white;'>
+                        <h2 style='margin: 0;'>Chào mừng thành viên VIP!</h2>
+                    </div>
+                    <div style='padding: 20px; color: #333;'>
+                        <p>Xin chào <strong>{user.FullName}</strong>,</p>
+                        <p>Chúc mừng bạn! Tài khoản của bạn tại hệ thống <strong>NoteVui</strong> vừa được quản trị viên cấp mới/gia hạn gói <strong>{planNameStr}</strong>.</p>
+                        <p>Dưới đây là thông tin chi tiết gói cước của bạn:</p>
+                        <table style='width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px;'>
+                            <tr>
+                                <td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>Loại gói:</strong></td>
+                                <td style='padding: 8px; border-bottom: 1px solid #ddd;'>{planNameStr}</td>
+                            </tr>
+                            <tr>
+                                <td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>Ngày hiệu lực:</strong></td>
+                                <td style='padding: 8px; border-bottom: 1px solid #ddd;'>{now.AddHours(7):dd/MM/yyyy HH:mm} (Giờ VN)</td>
+                            </tr>
+                            <tr>
+                                <td style='padding: 8px; border-bottom: 1px solid #ddd;'><strong>Ngày hết hạn:</strong></td>
+                                <td style='padding: 8px; border-bottom: 1px solid #ddd;'>{endDate.AddHours(7):dd/MM/yyyy HH:mm} (Giờ VN)</td>
+                            </tr>
+                        </table>
+                        <p>Với gói VIP, bạn đã có thể tận hưởng toàn bộ các quyền lợi cao cấp nhất của NoteVui bao gồm tính năng tạo ghi chú thông minh không giới hạn và các công cụ AI nâng cao vô cùng mạnh mẽ.</p>
+                        <p>Cảm ơn bạn đã luôn tin tưởng và sử dụng NoteVui!</p>
+                        <br/>
+                        <p>Trân trọng,<br/><strong>Đội ngũ NoteVui</strong></p>
+                    </div>
+                    <div style='background-color: #f9f9f9; padding: 15px; text-align: center; font-size: 12px; color: #888;'>
+                        <p style='margin: 0;'>Đây là email tự động từ hệ thống NoteVui. Vui lòng không trả lời qua email này.</p>
+                    </div>
+                </div>";
+
+            try
+            {
+                await _mailService.SendEmailAsync(user.Email, emailSubject, emailBody);
+            }
+            catch (Exception ex)
+            {
+                // Log exception implicitly or explicitly, do not block API execution
+                Console.WriteLine($"Lỗi khi gửi email VIP: {ex.Message}");
+            }
+        }
 
         return new UserSubscriptionDto
         {
