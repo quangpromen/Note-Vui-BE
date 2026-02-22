@@ -122,6 +122,7 @@ Danh sách người dùng hỗ trợ tìm kiếm và phân trang theo chuẩn Se
   - `Free`: 100 năm
   - `PremiumMonthly`: 1 tháng từ hiện tại
   - `PremiumYearly`: 1 năm từ hiện tại
+- **Email Notification**: Khi người dùng được cấp hoặc gia hạn gói Premium (VIP), hệ thống sẽ tự động gửi một email thông báo chuyên nghiệp (HTML, Tiếng Việt) tới địa chỉ email của người dùng.
 
 - **Success Response (200 OK)**:
 ```json
