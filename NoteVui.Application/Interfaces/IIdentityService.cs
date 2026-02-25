@@ -11,4 +11,5 @@ public interface IIdentityService
     Task ChangePasswordAsync(string userId, ChangePasswordRequest request);
     Task UpdateProfileAsync(string userId, UpdateProfileRequest request);
     Task RevokeTokenAsync(string userId);
+    Task<AuthResponse> GoogleLoginAsync(GoogleLoginRequest request);
 }
