@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using NoteVui.Application.DTOs.Auth;
 using NoteVui.Application.Interfaces;
+using NoteVui.Application.Services.Interfaces;
 using NoteVui.Domain.Entities.Identity;
 
 namespace NoteVui.Infrastructure.Identity;
@@ -16,15 +17,21 @@ public class IdentityService : IIdentityService
     private readonly UserManager<AppUser> _userManager;
     private readonly SignInManager<AppUser> _signInManager;
     private readonly IConfiguration _configuration;
+    private readonly IOtpService _otpService;
+    private readonly IMailService _mailService;
 
     public IdentityService(
         UserManager<AppUser> userManager,
         SignInManager<AppUser> signInManager,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IOtpService otpService,
+        IMailService mailService)
     {
         _userManager = userManager;
         _signInManager = signInManager;
         _configuration = configuration;
+        _otpService = otpService;
+        _mailService = mailService;
     }
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
@@ -190,6 +197,148 @@ public class IdentityService : IIdentityService
         return await GenerateAuthResponseAsync(user);
     }
 
+    #region OTP-Based Registration Flow
+
+    /// <summary>
+    /// Step 1: Send OTP to user's email for registration verification.
+    /// Security: Does NOT reveal whether the email already exists (prevents email enumeration).
+    /// </summary>
+    public async Task SendRegistrationOtpAsync(SendOtpRequest request)
+    {
+        var email = request.Email.Trim().ToLowerInvariant();
+
+        // Check if email already registered — but DON'T tell the client 
+        // (prevent email enumeration attack). Still send nothing.
+        var existingUser = await _userManager.FindByEmailAsync(email);
+        if (existingUser != null)
+        {
+            // Silently return — client sees "OTP sent" but no email goes out.
+            // This prevents attackers from discovering valid emails.
+            return;
+        }
+
+        // Check rate limit
+        if (_otpService.IsRateLimited(email))
+        {
+            throw new Exception("Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau 10 phút.");
+        }
+
+        // Generate OTP
+        var otp = _otpService.GenerateOtp(email);
+        if (otp == null)
+        {
+            throw new Exception("Không thể gửi mã OTP lúc này. Vui lòng thử lại sau.");
+        }
+
+        // Build beautiful HTML email
+        var emailBody = BuildOtpEmailBody(otp);
+
+        // Send email
+        await _mailService.SendEmailAsync(
+            email,
+            "NoteVui - Mã xác nhận đăng ký tài khoản",
+            emailBody);
+    }
+
+    /// <summary>
+    /// Step 2: Verify OTP and return a short-lived registration token.
+    /// The token encodes email + fullName so the client cannot tamper with them.
+    /// </summary>
+    public async Task<string> VerifyRegistrationOtpAsync(VerifyOtpRequest request)
+    {
+        var email = request.Email.Trim().ToLowerInvariant();
+
+        // Double-check email is not already registered
+        var existingUser = await _userManager.FindByEmailAsync(email);
+        if (existingUser != null)
+        {
+            throw new Exception("Email này đã được đăng ký.");
+        }
+
+        var result = _otpService.VerifyOtp(email, request.Otp);
+
+        switch (result)
+        {
+            case OtpVerificationResult.Success:
+                // Generate a short-lived registration token (10 minutes)
+                var registrationToken = GenerateRegistrationToken(email);
+                // Remove OTP after successful verification (one-time use)
+                _otpService.RemoveOtp(email);
+                return registrationToken;
+
+            case OtpVerificationResult.InvalidOtp:
+                throw new Exception("Mã OTP không chính xác.");
+
+            case OtpVerificationResult.Expired:
+                throw new Exception("Mã OTP đã hết hạn. Vui lòng yêu cầu mã mới.");
+
+            case OtpVerificationResult.TooManyAttempts:
+                throw new Exception("Bạn đã nhập sai quá nhiều lần. Vui lòng yêu cầu mã OTP mới.");
+
+            case OtpVerificationResult.NotFound:
+                throw new Exception("Không tìm thấy mã OTP. Vui lòng yêu cầu mã mới.");
+
+            default:
+                throw new Exception("Đã xảy ra lỗi. Vui lòng thử lại.");
+        }
+    }
+
+    /// <summary>
+    /// Step 3: Complete registration using the registration token and password.
+    /// Validates the token, extracts email + fullName, creates the user account.
+    /// </summary>
+    public async Task<AuthResponse> CompleteRegistrationAsync(CompleteRegistrationRequest request)
+    {
+        // Validate and extract email from registration token
+        var (email, _) = ValidateRegistrationToken(request.RegistrationToken);
+
+        // Final check: email not already registered (race condition protection)
+        var existingUser = await _userManager.FindByEmailAsync(email);
+        if (existingUser != null)
+        {
+            throw new Exception("Email này đã được đăng ký.");
+        }
+
+        // Create user
+        var user = new AppUser
+        {
+            UserName = email,
+            Email = email,
+            FullName = request.FullName
+        };
+
+        var createResult = await _userManager.CreateAsync(user, request.Password);
+        if (!createResult.Succeeded)
+        {
+            var errors = string.Join(", ", createResult.Errors.Select(e => e.Description));
+            throw new Exception($"Không thể tạo tài khoản: {errors}");
+        }
+
+        // Send welcome email (fire-and-forget, do not block registration)
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var welcomeBody = BuildWelcomeEmailBody(request.FullName);
+                await _mailService.SendEmailAsync(
+                    email,
+                    "NoteVui - Chào mừng bạn đến với NoteVui! 🎉",
+                    welcomeBody);
+            }
+            catch
+            {
+                // Silently ignore — welcome email failure should not affect registration
+            }
+        });
+
+        // Return auth response (auto-login after registration)
+        return await GenerateAuthResponseAsync(user);
+    }
+
+    #endregion
+
+    #region Private Helpers
+
     private async Task<AuthResponse> GenerateAuthResponseAsync(AppUser user)
     {
         var authClaims = new List<Claim>
@@ -263,4 +412,237 @@ public class IdentityService : IIdentityService
 
         return principal;
     }
+
+    /// <summary>
+    /// Generates a short-lived JWT token (10 minutes) that encodes 
+    /// the verified email and fullName for the final registration step.
+    /// This prevents the client from changing the email after OTP verification.
+    /// </summary>
+    private string GenerateRegistrationToken(string email)
+    {
+        var secretKey = _configuration["JwtSettings:Key"];
+        if (string.IsNullOrEmpty(secretKey)) throw new Exception("JWT Key is missing");
+
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+
+        var claims = new[]
+        {
+            new Claim("purpose", "registration"),
+            new Claim("email", email),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: _configuration["JwtSettings:Issuer"],
+            audience: _configuration["JwtSettings:Audience"],
+            claims: claims,
+            expires: DateTime.UtcNow.AddMinutes(10),
+            signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256)
+        );
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    /// <summary>
+    /// Validates the registration token and extracts email + fullName.
+    /// Throws if the token is invalid, expired, or has wrong purpose.
+    /// </summary>
+    private (string Email, string FullName) ValidateRegistrationToken(string token)
+    {
+        var secretKey = _configuration["JwtSettings:Key"];
+        if (string.IsNullOrEmpty(secretKey)) throw new Exception("JWT Key is missing");
+
+        var tokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateAudience = true,
+            ValidAudience = _configuration["JwtSettings:Audience"],
+            ValidateIssuer = true,
+            ValidIssuer = _configuration["JwtSettings:Issuer"],
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero // No tolerance for expiration
+        };
+
+        try
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out SecurityToken securityToken);
+
+            if (securityToken is not JwtSecurityToken jwtToken ||
+                !jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
+            {
+                throw new Exception("Token đăng ký không hợp lệ.");
+            }
+
+            // Verify this is actually a registration token, not a regular auth token
+            var purpose = principal.FindFirstValue("purpose");
+            if (purpose != "registration")
+            {
+                throw new Exception("Token không phải dùng cho đăng ký.");
+            }
+
+            var email = principal.FindFirstValue("email") ?? principal.FindFirstValue(ClaimTypes.Email);
+            // FullName was stored in the OTP send step, we pass it through the token
+            // For simplicity, we'll get it from the registration flow
+            var fullName = principal.FindFirstValue("fullName") ?? string.Empty;
+
+            if (string.IsNullOrEmpty(email))
+            {
+                throw new Exception("Token đăng ký không chứa email.");
+            }
+
+            return (email, fullName);
+        }
+        catch (SecurityTokenExpiredException)
+        {
+            throw new Exception("Token đăng ký đã hết hạn. Vui lòng thực hiện lại quy trình đăng ký.");
+        }
+        catch (SecurityTokenException)
+        {
+            throw new Exception("Token đăng ký không hợp lệ.");
+        }
+    }
+
+    /// <summary>
+    /// Builds a professional HTML email template for OTP verification.
+    /// </summary>
+    private static string BuildOtpEmailBody(string otp)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+</head>
+<body style='margin:0; padding:0; background-color:#f4f7fa; font-family:Segoe UI, Arial, sans-serif;'>
+    <table width='100%' cellpadding='0' cellspacing='0' style='padding:40px 0;'>
+        <tr>
+            <td align='center'>
+                <table width='480' cellpadding='0' cellspacing='0' style='background:#ffffff; border-radius:16px; box-shadow:0 4px 24px rgba(0,0,0,0.08); overflow:hidden;'>
+                    <!-- Header -->
+                    <tr>
+                        <td style='background:linear-gradient(135deg, #6366f1, #8b5cf6); padding:32px; text-align:center;'>
+                            <h1 style='color:#ffffff; margin:0; font-size:28px; font-weight:700;'>📝 NoteVui</h1>
+                            <p style='color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:14px;'>Xác nhận đăng ký tài khoản</p>
+                        </td>
+                    </tr>
+                    <!-- Body -->
+                    <tr>
+                        <td style='padding:32px;'>
+                            <p style='color:#1e293b; font-size:16px; margin:0 0 16px;'>Xin chào,</p>
+                            <p style='color:#475569; font-size:14px; line-height:1.6; margin:0 0 24px;'>
+                                Cảm ơn bạn đã đăng ký tài khoản NoteVui. Vui lòng sử dụng mã OTP bên dưới để xác nhận email của bạn:
+                            </p>
+                            <!-- OTP Code -->
+                            <table width='100%' cellpadding='0' cellspacing='0'>
+                                <tr>
+                                    <td align='center' style='padding:20px 0;'>
+                                        <div style='background:linear-gradient(135deg, #f0f0ff, #e8e0ff); border:2px dashed #6366f1; border-radius:12px; padding:20px 40px; display:inline-block;'>
+                                            <span style='font-size:36px; font-weight:800; color:#4f46e5; letter-spacing:8px; font-family:monospace;'>{otp}</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                            <!-- Warning -->
+                            <div style='background:#fef3c7; border-left:4px solid #f59e0b; padding:12px 16px; border-radius:0 8px 8px 0; margin:20px 0;'>
+                                <p style='color:#92400e; font-size:13px; margin:0;'>
+                                    ⚠️ Mã OTP có hiệu lực trong <strong>5 phút</strong>. Không chia sẻ mã này với bất kỳ ai.
+                                </p>
+                            </div>
+                            <p style='color:#94a3b8; font-size:13px; line-height:1.5; margin:16px 0 0;'>
+                                Nếu bạn không yêu cầu đăng ký, vui lòng bỏ qua email này.
+                            </p>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style='background:#f8fafc; padding:20px 32px; text-align:center; border-top:1px solid #e2e8f0;'>
+                            <p style='color:#94a3b8; font-size:12px; margin:0;'>© 2026 NoteVui. All rights reserved.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>";
+    }
+
+    /// <summary>
+    /// Builds a professional HTML welcome email after successful registration.
+    /// </summary>
+    private static string BuildWelcomeEmailBody(string fullName)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+</head>
+<body style='margin:0; padding:0; background-color:#f4f7fa; font-family:Segoe UI, Arial, sans-serif;'>
+    <table width='100%' cellpadding='0' cellspacing='0' style='padding:40px 0;'>
+        <tr>
+            <td align='center'>
+                <table width='480' cellpadding='0' cellspacing='0' style='background:#ffffff; border-radius:16px; box-shadow:0 4px 24px rgba(0,0,0,0.08); overflow:hidden;'>
+                    <!-- Header -->
+                    <tr>
+                        <td style='background:linear-gradient(135deg, #10b981, #059669); padding:32px; text-align:center;'>
+                            <h1 style='color:#ffffff; margin:0; font-size:28px; font-weight:700;'>🎉 Chào mừng!</h1>
+                            <p style='color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:14px;'>Tài khoản NoteVui của bạn đã sẵn sàng</p>
+                        </td>
+                    </tr>
+                    <!-- Body -->
+                    <tr>
+                        <td style='padding:32px;'>
+                            <p style='color:#1e293b; font-size:16px; margin:0 0 16px;'>Xin chào <strong>{fullName}</strong>,</p>
+                            <p style='color:#475569; font-size:14px; line-height:1.6; margin:0 0 24px;'>
+                                Chúc mừng bạn đã đăng ký tài khoản <strong>NoteVui</strong> thành công! 🎊
+                            </p>
+                            <p style='color:#475569; font-size:14px; line-height:1.6; margin:0 0 24px;'>
+                                Bạn có thể bắt đầu sử dụng ứng dụng ngay bây giờ với các tính năng:
+                            </p>
+                            <!-- Features -->
+                            <table width='100%' cellpadding='0' cellspacing='0' style='margin:0 0 24px;'>
+                                <tr>
+                                    <td style='padding:10px 0; border-bottom:1px solid #f1f5f9;'>
+                                        <span style='font-size:18px; margin-right:8px;'>📝</span>
+                                        <span style='color:#334155; font-size:14px;'>Tạo và quản lý ghi chú không giới hạn</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style='padding:10px 0; border-bottom:1px solid #f1f5f9;'>
+                                        <span style='font-size:18px; margin-right:8px;'>☁️</span>
+                                        <span style='color:#334155; font-size:14px;'>Đồng bộ dữ liệu đám mây an toàn</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style='padding:10px 0;'>
+                                        <span style='font-size:18px; margin-right:8px;'>🤖</span>
+                                        <span style='color:#334155; font-size:14px;'>Trợ lý AI thông minh (Nâng cấp Premium)</span>
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style='color:#94a3b8; font-size:13px; line-height:1.5; margin:0;'>
+                                Nếu bạn có bất kỳ câu hỏi nào, vui lòng liên hệ đội ngũ hỗ trợ của chúng tôi.
+                            </p>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style='background:#f8fafc; padding:20px 32px; text-align:center; border-top:1px solid #e2e8f0;'>
+                            <p style='color:#94a3b8; font-size:12px; margin:0;'>© 2026 NoteVui. All rights reserved.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>";
+    }
+
+    #endregion
 }

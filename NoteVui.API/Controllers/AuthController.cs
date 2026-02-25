@@ -127,4 +127,104 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Step 1: Send a 6-digit OTP to the user's email for registration verification.
+    /// </summary>
+    [HttpPost("register/send-otp")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> SendRegistrationOtp([FromBody] SendOtpRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            await _identityService.SendRegistrationOtpAsync(request);
+            return Ok(new
+            {
+                success = true,
+                message = "Mã OTP đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư (bao gồm thư rác)."
+            });
+        }
+        catch (Exception ex)
+        {
+            // Rate limit → 429
+            if (ex.Message.Contains("quá nhiều"))
+            {
+                return StatusCode(StatusCodes.Status429TooManyRequests,
+                    new { message = ex.Message });
+            }
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Step 2: Verify the OTP code. Returns a short-lived registration token on success.
+    /// </summary>
+    [HttpPost("register/verify-otp")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> VerifyRegistrationOtp([FromBody] VerifyOtpRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            var registrationToken = await _identityService.VerifyRegistrationOtpAsync(request);
+            return Ok(new
+            {
+                success = true,
+                message = "Xác nhận OTP thành công.",
+                registrationToken
+            });
+        }
+        catch (Exception ex)
+        {
+            if (ex.Message.Contains("quá nhiều"))
+            {
+                return StatusCode(StatusCodes.Status429TooManyRequests,
+                    new { message = ex.Message });
+            }
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Step 3: Complete registration with registration token, password and full name.
+    /// Returns auth tokens on success (auto-login).
+    /// </summary>
+    [HttpPost("register/complete")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CompleteRegistration([FromBody] CompleteRegistrationRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            var result = await _identityService.CompleteRegistrationAsync(request);
+            return Ok(new
+            {
+                success = true,
+                message = "Đăng ký tài khoản thành công!",
+                data = result
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }

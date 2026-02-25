@@ -12,4 +12,9 @@ public interface IIdentityService
     Task UpdateProfileAsync(string userId, UpdateProfileRequest request);
     Task RevokeTokenAsync(string userId);
     Task<AuthResponse> GoogleLoginAsync(GoogleLoginRequest request);
+
+    // OTP-based Registration Flow
+    Task SendRegistrationOtpAsync(SendOtpRequest request);
+    Task<string> VerifyRegistrationOtpAsync(VerifyOtpRequest request);
+    Task<AuthResponse> CompleteRegistrationAsync(CompleteRegistrationRequest request);
 }

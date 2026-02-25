@@ -13,14 +13,59 @@ This documentation provides detailed JSON payloads and endpoint specifications f
 
 ## 🔐 Authentication & Account (`api/auth`)
 
-### 1. Register
-Create a new user account.
+### 1. Register (3-Step OTP Flow)
+User registration now requires email verification via OTP before account creation.
+
+#### Step 1: Send OTP
+Send a 6-digit OTP to the user's email.
 - **Method:** `POST`
-- **Endpoint:** `/api/auth/register`
+- **Endpoint:** `/api/auth/register/send-otp`
 - **Request Body:**
 ```json
 {
   "email": "user@example.com",
+  "fullName": "Nguyen Van A"
+}
+```
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Mã OTP đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư (bao gồm thư rác)."
+}
+```
+- **Error Response (429 Too Many Requests):** Gửi quá nhiều OTP trong 10 phút.
+
+#### Step 2: Verify OTP
+Verify the 6-digit OTP. Returns a `registrationToken` (valid 10 minutes).
+- **Method:** `POST`
+- **Endpoint:** `/api/auth/register/verify-otp`
+- **Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "otp": "123456"
+}
+```
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Xác nhận OTP thành công.",
+  "registrationToken": "eyJhbGciOiJIUzI1NiI..."
+}
+```
+- **Error (400):** OTP sai, hết hạn, hoặc nhập sai quá nhiều lần.
+- **Error (429):** Nhập sai quá 5 lần → yêu cầu mã mới.
+
+#### Step 3: Complete Registration
+Use `registrationToken` + password + fullName to create account. Auto-login on success.
+- **Method:** `POST`
+- **Endpoint:** `/api/auth/register/complete`
+- **Request Body:**
+```json
+{
+  "registrationToken": "eyJhbGciOiJIUzI1NiI...",
   "password": "SecretPassword123!",
   "fullName": "Nguyen Van A"
 }
@@ -28,14 +73,20 @@ Create a new user account.
 - **Success Response (200 OK):**
 ```json
 {
-  "accessToken": "ey...",
-  "refreshToken": "...",
-  "userId": "guid-string",
-  "email": "user@example.com",
-  "fullName": "Nguyen Van A",
-  "avatarUrl": null
+  "success": true,
+  "message": "Đăng ký tài khoản thành công!",
+  "data": {
+    "accessToken": "ey...",
+    "refreshToken": "...",
+    "userId": "guid-string",
+    "email": "user@example.com",
+    "fullName": "Nguyen Van A",
+    "avatarUrl": null
+  }
 }
 ```
+- **Error (400):** Token hết hạn hoặc không hợp lệ, email đã đăng ký.
+
 
 ### 2. Login
 Authenticate and receive tokens.
@@ -414,4 +465,5 @@ Update the current user's profile. Returns the full updated profile.
 - `403 Forbidden`: VIP feature accessed by Free user.
 - `400 BadRequest`: Validation failed (e.g., email format, empty content).
 - `404 NotFound`: Resource (Note) not found.
+- `429 Too Many Requests`: Rate limit exceeded (e.g., OTP send limit).
 - `500 Internal Server Error`: Server-side crash.
