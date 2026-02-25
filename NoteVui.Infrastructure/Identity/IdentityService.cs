@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Google.Apis.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
@@ -127,6 +128,68 @@ public class IdentityService : IIdentityService
         await _userManager.UpdateAsync(user);
     }
 
+    public async Task<AuthResponse> GoogleLoginAsync(GoogleLoginRequest request)
+    {
+        // 1. Verify Google ID Token
+        GoogleJsonWebSignature.Payload payload;
+        try
+        {
+            var settings = new GoogleJsonWebSignature.ValidationSettings
+            {
+                Audience = new List<string>
+                {
+                    _configuration["GoogleAuth:ClientId"] ?? throw new Exception("Google ClientId is not configured")
+                }
+            };
+
+            payload = await GoogleJsonWebSignature.ValidateAsync(request.IdToken, settings);
+        }
+        catch (InvalidJwtException)
+        {
+            throw new Exception("Invalid Google token.");
+        }
+
+        // 2. Extract email from the verified token
+        var email = payload.Email;
+        if (string.IsNullOrEmpty(email))
+        {
+            throw new Exception("Google account does not have an email.");
+        }
+
+        // 3. Check if user exists in our system
+        var user = await _userManager.FindByEmailAsync(email);
+        if (user == null)
+        {
+            throw new Exception("This Google account is not registered in the system. Please register first.");
+        }
+
+        // 4. Check if account is locked
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            throw new Exception("Account is locked.");
+        }
+
+        // 5. Update profile info from Google if needed
+        var needsUpdate = false;
+        if (!string.IsNullOrEmpty(payload.Name) && string.IsNullOrEmpty(user.FullName))
+        {
+            user.FullName = payload.Name;
+            needsUpdate = true;
+        }
+        if (!string.IsNullOrEmpty(payload.Picture) && string.IsNullOrEmpty(user.AvatarUrl))
+        {
+            user.AvatarUrl = payload.Picture;
+            needsUpdate = true;
+        }
+        if (needsUpdate)
+        {
+            await _userManager.UpdateAsync(user);
+        }
+
+        // 6. Generate JWT token and return
+        return await GenerateAuthResponseAsync(user);
+    }
+
     private async Task<AuthResponse> GenerateAuthResponseAsync(AppUser user)
     {
         var authClaims = new List<Claim>
@@ -134,7 +197,7 @@ public class IdentityService : IIdentityService
             new Claim(ClaimTypes.NameIdentifier, user.Id),
             new Claim(ClaimTypes.Email, user.Email!),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new Claim("FullName", user.FullName)
+            new Claim("FullName", user.FullName ?? string.Empty)
         };
 
         // Đọc roles của user từ database và thêm vào token
@@ -173,7 +236,7 @@ public class IdentityService : IIdentityService
             RefreshToken = refreshToken,
             UserId = user.Id,
             Email = user.Email!,
-            FullName = user.FullName,
+            FullName = user.FullName ?? string.Empty,
             AvatarUrl = user.AvatarUrl
         };
     }
@@ -183,8 +246,10 @@ public class IdentityService : IIdentityService
         var secretKey = _configuration["JwtSettings:Key"];
         var tokenValidationParameters = new TokenValidationParameters
         {
-            ValidateAudience = false,
-            ValidateIssuer = false,
+            ValidateAudience = true,
+            ValidAudience = _configuration["JwtSettings:Audience"],
+            ValidateIssuer = true,
+            ValidIssuer = _configuration["JwtSettings:Issuer"],
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey!)),
             ValidateLifetime = false
