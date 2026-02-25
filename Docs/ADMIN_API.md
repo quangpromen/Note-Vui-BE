@@ -235,6 +235,50 @@ Admin có thể sửa FullName, Email, AvatarUrl của user. Admin có quyền �
 }
 ```
 
+### 2.8. Tạo người dùng mới (Create User)
+Dùng để Admin chủ động tạo thêm User vào hệ thống.
+Nếu Email đã tồn tại, hệ thống không tạo mới mà trả về thông tin User hiện tại (không báo lỗi).
+
+- **Endpoint**: `POST /api/admin/users`
+- **Visual Mapping**: Form Modal (Thêm mới) có các trường Email, Password, FullName, AvatarUrl (Tùy chọn).
+- **Request Body**:
+```json
+{
+  "email": "newuser@example.com",
+  "password": "Password123!",
+  "fullName": "Người Dùng Mới",
+  "avatarUrl": "https://image-url.com/avatar.jpg"
+}
+```
+- **Request Validation**:
+  - `email`: Required, định dạng email.
+  - `password`: Required, ít nhất 6 ký tự.
+  - `fullName`: Required, max 100 ký tự.
+  - `avatarUrl`: Optional (nullable).
+
+- **Success Response (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Xử lý người dùng thành công.",
+  "data": {
+    "userId": "user-guid-string",
+    "email": "newuser@example.com",
+    "fullName": "Người Dùng Mới",
+    "avatarUrl": "https://image-url.com/avatar.jpg",
+    "isLocked": false,
+    "lockoutEnd": null,
+    "subscription": null,
+    "totalNotes": 0,
+    "activeNotes": 0,
+    "deletedNotes": 0,
+    "pinnedNotes": 0,
+    "aiUsage": null
+  }
+}
+```
+- **Error Response (400 Bad Request)**: Lỗi Validation.
+
 ---
 
 ## 3. Cấu trúc Schema DTO (Data Models)
@@ -315,6 +359,14 @@ Admin có thể sửa FullName, Email, AvatarUrl của user. Admin có quyền �
 | `email` | `string` | Required, định dạng email |
 | `avatarUrl` | `string?` | Optional (nullable) |
 
+### AdminCreateUserRequest (MỚI)
+| Trường | Kiểu dữ liệu | Mô tả |
+| :--- | :--- | :--- |
+| `email` | `string` | Required, định dạng email |
+| `password` | `string` | Required, tối thiểu 6 ký tự |
+| `fullName` | `string` | Required, max 100 ký tự |
+| `avatarUrl` | `string?` | Optional (nullable) |
+
 ---
 
 ## 4. Giao thức Kỹ thuật (Technical Nuances)
@@ -360,4 +412,4 @@ Nếu bạn sử dụng AI để tạo Front-end, hãy cung cấp các yêu cầ
 > 9. Tông màu chủ đạo: Slate & Indigo đậm chất SaaS."
 
 ---
-*Cập nhật lần cuối: 14/02/2026*
+*Cập nhật lần cuối: 25/02/2026*

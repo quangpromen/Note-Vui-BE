@@ -107,7 +107,13 @@ builder.Services.AddAuthentication(options =>
         },
         OnTokenValidated = context =>
         {
-            Console.WriteLine("Token Validated Successfully");
+            // Security check: If this is an OTP registration token, reject it immediately
+            // because it shouldn't be used to access regular APIs.
+            var purpose = context.Principal?.FindFirst("purpose")?.Value;
+            if (purpose == "registration")
+            {
+                context.Fail("Registration tokens cannot be used as API access tokens.");
+            }
             return Task.CompletedTask;
         },
         OnMessageReceived = context =>
@@ -132,6 +138,10 @@ builder.Services.AddScoped<IVipService, VipService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>();
 builder.Services.AddHttpContextAccessor();
+
+// OTP Service - Singleton (in-memory store must persist across requests)
+builder.Services.AddSingleton<IOtpService, OtpService>();
+
 
 // Email Service Configuration
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));

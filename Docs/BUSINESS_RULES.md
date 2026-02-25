@@ -70,5 +70,28 @@ Tài liệu này mô tả các quy tắc nghiệp vụ (Business Rules) hiện �
 
 ---
 
+## 5. 🛡️ Xác thực & Bảo mật (Security & Authentication)
+
+> **Quy tắc cốt lõi (Core Rule):** Hệ thống áp dụng tiêu chuẩn bảo mật mức cao (Enterprise-Grade) cho toàn bộ quy trình định danh người dùng.
+
+### 5.1. Luồng đăng ký 3 bước bằng OTP Email
+Hệ thống không cho phép tạo tài khoản trực tiếp. Thay vào đó, quy trình đăng ký bắt buộc phải thông qua xác minh email với mã OTP 6 số:
+1. Gửi OTP đến email.
+2. Xác minh OTP để cấp một Token cấp phép đặc biệt (`registrationToken`).
+3. Dùng token đó để hoàn tất việc đăng ký tạo người dùng.
+
+### 5.2. Các chốt chặn bảo mật (Backend Security Highlight)
+Để đáp ứng chuẩn dự án thực tế, Backend đã được áp dụng các biện pháp bảo vệ sâu:
+- **Chống Email Enumeration**: API Gửi OTP sẽ không bao giờ báo lỗi "Email đã tồn tại", kẻ xấu không thể lợi dụng API này để dò quét tệp email khách hàng.
+- **Hash OTP trên RAM**: OTP không được lưu dưới dạng Plaintext, mà được băm bằng thuật toán `SHA-256` trước khi đưa vào Ram (Sử dụng `ConcurrentDictionary`).
+- **Chống Timing Attack**: So sánh OTP hash bằng thuật toán thời gian hằng số `CryptographicOperations.FixedTimeEquals()` thay vì so sánh chuỗi thông thường.
+- **Rate-Limiting & Brute-Force Protection**: 
+  - Chỉ cho phép gửi tối đa 5 mã OTP / 10 phút. 
+  - Chỉ cho phép nhập sai tối đa 5 lần trước khi mã OTP bị hủy hoàn toàn.
+- **Phân lập Token (Token Isolation)**: Token được cấp ở bước verify OTP KHÔNG THỂ đem dùng làm Access Token để chọc vào các API khác của hệ thống, Backend sẽ chủ động từ chối.
+- **Tự dọn dẹp bộ nhớ (Garbage Collection)**: Timer chạy ngầm dọn các OTP đã quá hạn 5 phút mỗi 15 phút để chống tràn RAM.
+
+---
+
 *Tài liệu được cập nhật tự động theo mã nguồn hiện tại.*
-*Last updated: 2026-02-05*
+*Last updated: 2026-02-26*
