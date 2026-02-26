@@ -17,4 +17,9 @@ public interface IIdentityService
     Task SendRegistrationOtpAsync(SendOtpRequest request);
     Task<string> VerifyRegistrationOtpAsync(VerifyOtpRequest request);
     Task<AuthResponse> CompleteRegistrationAsync(CompleteRegistrationRequest request);
+
+    // OTP-based Forgot Password Flow
+    Task ForgotPasswordSendOtpAsync(SendOtpRequest request);
+    Task<string> ForgotPasswordVerifyOtpAsync(VerifyOtpRequest request);
+    Task ForgotPasswordResetAsync(ResetPasswordRequest request);
 }
