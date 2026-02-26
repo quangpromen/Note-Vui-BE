@@ -337,6 +337,112 @@ public class IdentityService : IIdentityService
 
     #endregion
 
+    #region OTP-Based Forgot Password Flow
+
+    public async Task ForgotPasswordSendOtpAsync(SendOtpRequest request)
+    {
+        var email = request.Email.Trim().ToLowerInvariant();
+
+        var existingUser = await _userManager.FindByEmailAsync(email);
+        if (existingUser == null)
+        {
+            throw new Exception("Email chưa tồn tại trong hệ thống. Vui lòng đăng ký tài khoản.");
+        }
+
+        if (_otpService.IsRateLimited(email))
+        {
+            throw new Exception("Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau 10 phút.");
+        }
+
+        var otp = _otpService.GenerateOtp(email);
+        if (otp == null)
+        {
+            throw new Exception("Không thể gửi mã OTP lúc này. Vui lòng thử lại sau.");
+        }
+
+        var emailBody = BuildForgotPasswordOtpEmailBody(otp);
+
+        await _mailService.SendEmailAsync(
+            email,
+            "NoteVui - Mã xác nhận quên mật khẩu",
+            emailBody);
+    }
+
+    public async Task<string> ForgotPasswordVerifyOtpAsync(VerifyOtpRequest request)
+    {
+        var email = request.Email.Trim().ToLowerInvariant();
+
+        var existingUser = await _userManager.FindByEmailAsync(email);
+        if (existingUser == null)
+        {
+            throw new Exception("Email không hợp lệ.");
+        }
+
+        var result = _otpService.VerifyOtp(email, request.Otp);
+
+        switch (result)
+        {
+            case OtpVerificationResult.Success:
+                var resetToken = GenerateForgotPasswordToken(email);
+                _otpService.RemoveOtp(email);
+                return resetToken;
+
+            case OtpVerificationResult.InvalidOtp:
+                throw new Exception("Mã OTP không chính xác.");
+
+            case OtpVerificationResult.Expired:
+                throw new Exception("Mã OTP đã hết hạn. Vui lòng yêu cầu mã mới.");
+
+            case OtpVerificationResult.TooManyAttempts:
+                throw new Exception("Bạn đã nhập sai quá nhiều lần. Vui lòng yêu cầu mã OTP mới.");
+
+            case OtpVerificationResult.NotFound:
+                throw new Exception("Không tìm thấy mã OTP. Vui lòng yêu cầu mã mới.");
+
+            default:
+                throw new Exception("Đã xảy ra lỗi. Vui lòng thử lại.");
+        }
+    }
+
+    public async Task ForgotPasswordResetAsync(ResetPasswordRequest request)
+    {
+        var email = ValidateForgotPasswordToken(request.ResetToken);
+
+        var user = await _userManager.FindByEmailAsync(email);
+        if (user == null)
+        {
+            throw new Exception("Không tìm thấy người dùng.");
+        }
+
+        var identityResetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
+        var result = await _userManager.ResetPasswordAsync(user, identityResetToken, request.NewPassword);
+
+        if (!result.Succeeded)
+        {
+            var errors = string.Join(", ", result.Errors.Select(e => e.Description));
+            throw new Exception($"Không thể đặt lại mật khẩu: {errors}");
+        }
+
+        // Send success email (fire-and-forget, do not block the response)
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var successBody = BuildPasswordResetSuccessEmailBody(user.FullName ?? "bạn");
+                await _mailService.SendEmailAsync(
+                    email,
+                    "NoteVui - Đổi mật khẩu thành công ✅",
+                    successBody);
+            }
+            catch
+            {
+                // Silently ignore email sending errors
+            }
+        });
+    }
+
+    #endregion
+
     #region Private Helpers
 
     private async Task<AuthResponse> GenerateAuthResponseAsync(AppUser user)
@@ -627,6 +733,200 @@ public class IdentityService : IIdentityService
                             </table>
                             <p style='color:#94a3b8; font-size:13px; line-height:1.5; margin:0;'>
                                 Nếu bạn có bất kỳ câu hỏi nào, vui lòng liên hệ đội ngũ hỗ trợ của chúng tôi.
+                            </p>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style='background:#f8fafc; padding:20px 32px; text-align:center; border-top:1px solid #e2e8f0;'>
+                            <p style='color:#94a3b8; font-size:12px; margin:0;'>© 2026 NoteVui. All rights reserved.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>";
+    }
+
+    private string GenerateForgotPasswordToken(string email)
+    {
+        var secretKey = _configuration["JwtSettings:Key"];
+        if (string.IsNullOrEmpty(secretKey)) throw new Exception("JWT Key is missing");
+
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+
+        var claims = new[]
+        {
+            new Claim("purpose", "forgot_password"),
+            new Claim("email", email),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: _configuration["JwtSettings:Issuer"],
+            audience: _configuration["JwtSettings:Audience"],
+            claims: claims,
+            expires: DateTime.UtcNow.AddMinutes(10),
+            signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256)
+        );
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private string ValidateForgotPasswordToken(string token)
+    {
+        var secretKey = _configuration["JwtSettings:Key"];
+        if (string.IsNullOrEmpty(secretKey)) throw new Exception("JWT Key is missing");
+
+        var tokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateAudience = true,
+            ValidAudience = _configuration["JwtSettings:Audience"],
+            ValidateIssuer = true,
+            ValidIssuer = _configuration["JwtSettings:Issuer"],
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+
+        try
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out SecurityToken securityToken);
+
+            if (securityToken is not JwtSecurityToken jwtToken ||
+                !jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
+            {
+                throw new Exception("Token không hợp lệ.");
+            }
+
+            var purpose = principal.FindFirstValue("purpose");
+            if (purpose != "forgot_password")
+            {
+                throw new Exception("Token không hợp lệ cho tác vụ này.");
+            }
+
+            var email = principal.FindFirstValue("email") ?? principal.FindFirstValue(ClaimTypes.Email);
+
+            if (string.IsNullOrEmpty(email))
+            {
+                throw new Exception("Token không chứa email.");
+            }
+
+            return email;
+        }
+        catch (SecurityTokenExpiredException)
+        {
+            throw new Exception("Token đã hết hạn. Vui lòng thực hiện lại quy trình.");
+        }
+        catch (SecurityTokenException)
+        {
+            throw new Exception("Token không hợp lệ.");
+        }
+    }
+
+    private static string BuildForgotPasswordOtpEmailBody(string otp)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+</head>
+<body style='margin:0; padding:0; background-color:#f4f7fa; font-family:Segoe UI, Arial, sans-serif;'>
+    <table width='100%' cellpadding='0' cellspacing='0' style='padding:40px 0;'>
+        <tr>
+            <td align='center'>
+                <table width='480' cellpadding='0' cellspacing='0' style='background:#ffffff; border-radius:16px; box-shadow:0 4px 24px rgba(0,0,0,0.08); overflow:hidden;'>
+                    <!-- Header -->
+                    <tr>
+                        <td style='background:linear-gradient(135deg, #f43f5e, #e11d48); padding:32px; text-align:center;'>
+                            <h1 style='color:#ffffff; margin:0; font-size:28px; font-weight:700;'>📝 NoteVui</h1>
+                            <p style='color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:14px;'>Khôi phục mật khẩu</p>
+                        </td>
+                    </tr>
+                    <!-- Body -->
+                    <tr>
+                        <td style='padding:32px;'>
+                            <p style='color:#1e293b; font-size:16px; margin:0 0 16px;'>Xin chào,</p>
+                            <p style='color:#475569; font-size:14px; line-height:1.6; margin:0 0 24px;'>
+                                Bạn vừa yêu cầu khôi phục mật khẩu. Vui lòng sử dụng mã OTP bên dưới để xác nhận:
+                            </p>
+                            <!-- OTP Code -->
+                            <table width='100%' cellpadding='0' cellspacing='0'>
+                                <tr>
+                                    <td align='center' style='padding:20px 0;'>
+                                        <div style='background:linear-gradient(135deg, #fff0f2, #ffe4e6); border:2px dashed #f43f5e; border-radius:12px; padding:20px 40px; display:inline-block;'>
+                                            <span style='font-size:36px; font-weight:800; color:#e11d48; letter-spacing:8px; font-family:monospace;'>{otp}</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                            <!-- Warning -->
+                            <div style='background:#fef3c7; border-left:4px solid #f59e0b; padding:12px 16px; border-radius:0 8px 8px 0; margin:20px 0;'>
+                                <p style='color:#92400e; font-size:13px; margin:0;'>
+                                    ⚠️ Mã OTP có hiệu lực trong <strong>5 phút</strong>. Không chia sẻ mã này với bất kỳ ai.
+                                </p>
+                            </div>
+                            <p style='color:#94a3b8; font-size:13px; line-height:1.5; margin:16px 0 0;'>
+                                Nếu bạn không yêu cầu khôi phục mật khẩu, vui lòng bỏ qua email này hoặc liên hệ hỗ trợ.
+                            </p>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style='background:#f8fafc; padding:20px 32px; text-align:center; border-top:1px solid #e2e8f0;'>
+                            <p style='color:#94a3b8; font-size:12px; margin:0;'>© 2026 NoteVui. All rights reserved.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>";
+    }
+
+    private static string BuildPasswordResetSuccessEmailBody(string fullName)
+    {
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+</head>
+<body style='margin:0; padding:0; background-color:#f4f7fa; font-family:Segoe UI, Arial, sans-serif;'>
+    <table width='100%' cellpadding='0' cellspacing='0' style='padding:40px 0;'>
+        <tr>
+            <td align='center'>
+                <table width='480' cellpadding='0' cellspacing='0' style='background:#ffffff; border-radius:16px; box-shadow:0 4px 24px rgba(0,0,0,0.08); overflow:hidden;'>
+                    <!-- Header -->
+                    <tr>
+                        <td style='background:linear-gradient(135deg, #10b981, #059669); padding:32px; text-align:center;'>
+                            <h1 style='color:#ffffff; margin:0; font-size:28px; font-weight:700;'>✅ Thành công!</h1>
+                            <p style='color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:14px;'>Mật khẩu của bạn đã được thay đổi</p>
+                        </td>
+                    </tr>
+                    <!-- Body -->
+                    <tr>
+                        <td style='padding:32px;'>
+                            <p style='color:#1e293b; font-size:16px; margin:0 0 16px;'>Xin chào <strong>{fullName}</strong>,</p>
+                            <p style='color:#475569; font-size:14px; line-height:1.6; margin:0 0 24px;'>
+                                Mật khẩu tài khoản NoteVui của bạn vừa được cập nhật thành công.
+                            </p>
+                            <!-- Warning -->
+                            <div style='background:#fef3c7; border-left:4px solid #f59e0b; padding:12px 16px; border-radius:0 8px 8px 0; margin:20px 0;'>
+                                <p style='color:#92400e; font-size:13px; margin:0;'>
+                                    ⚠️ Nếu bạn KHÔNG thực hiện thay đổi này, vui lòng liên hệ ngay với bộ phận hỗ trợ của chúng tôi để bảo mật tài khoản.
+                                </p>
+                            </div>
+                            <p style='color:#94a3b8; font-size:13px; line-height:1.5; margin:16px 0 0;'>
+                                Cảm ơn bạn đã sử dụng NoteVui!
                             </p>
                         </td>
                     </tr>

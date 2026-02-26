@@ -136,6 +136,63 @@ Get a new AccessToken when the old one expires.
 }
 ```
 
+### 6. Forgot Password (3-Step Flow)
+Reset a forgotten password using OTP verification.
+
+#### Step 1: Send OTP for Password Reset
+- **Method:** `POST`
+- **Endpoint:** `/api/auth/forgot-password/send-otp`
+- **Request Body:**
+```json
+{
+  "email": "user@example.com"
+}
+```
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Nếu email hợp lệ, mã OTP đã được gửi. Vui lòng kiểm tra hộp thư (bao gồm thư rác)."
+}
+```
+
+#### Step 2: Verify Forgot Password OTP
+- **Method:** `POST`
+- **Endpoint:** `/api/auth/forgot-password/verify-otp`
+- **Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "otp": "123456"
+}
+```
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Xác nhận OTP thành công.",
+  "resetToken": "eyJhbGciOiJIUzI1NiI..."
+}
+```
+
+#### Step 3: Reset Password
+- **Method:** `POST`
+- **Endpoint:** `/api/auth/forgot-password/reset`
+- **Request Body:**
+```json
+{
+  "resetToken": "eyJhbGciOiJIUzI1NiI...",
+  "newPassword": "NewPassword123!"
+}
+```
+- **Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Mật khẩu đã được thiết lập lại thành công. Vui lòng đăng nhập với mật khẩu mới."
+}
+```
+
 ---
 
 ## � Synchronization (`api/sync`)

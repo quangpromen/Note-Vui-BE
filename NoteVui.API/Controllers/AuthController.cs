@@ -227,4 +227,101 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Step 1: Send a 6-digit OTP to the user's email for forgot password.
+    /// </summary>
+    [HttpPost("forgot-password/send-otp")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> SendForgotPasswordOtp([FromBody] SendOtpRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            await _identityService.ForgotPasswordSendOtpAsync(request);
+            return Ok(new
+            {
+                success = true,
+                message = "Mã OTP đã được gửi. Vui lòng kiểm tra hộp thư (bao gồm thư rác)."
+            });
+        }
+        catch (Exception ex)
+        {
+            if (ex.Message.Contains("quá nhiều"))
+            {
+                return StatusCode(StatusCodes.Status429TooManyRequests,
+                    new { message = ex.Message });
+            }
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Step 2: Verify the forgot password OTP code. Returns a reset password token on success.
+    /// </summary>
+    [HttpPost("forgot-password/verify-otp")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> VerifyForgotPasswordOtp([FromBody] VerifyOtpRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            var resetToken = await _identityService.ForgotPasswordVerifyOtpAsync(request);
+            return Ok(new
+            {
+                success = true,
+                message = "Xác nhận OTP thành công.",
+                resetToken
+            });
+        }
+        catch (Exception ex)
+        {
+            if (ex.Message.Contains("quá nhiều"))
+            {
+                return StatusCode(StatusCodes.Status429TooManyRequests,
+                    new { message = ex.Message });
+            }
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Step 3: Reset password using the reset token and new password.
+    /// </summary>
+    [HttpPost("forgot-password/reset")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            await _identityService.ForgotPasswordResetAsync(request);
+            return Ok(new
+            {
+                success = true,
+                message = "Mật khẩu đã được thiết lập lại thành công. Vui lòng đăng nhập với mật khẩu mới."
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }

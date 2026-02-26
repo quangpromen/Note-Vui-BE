@@ -16,6 +16,11 @@ Luồng này đảm bảo an toàn tối đa cho hệ thống bằng cách xác 
 - Khi Access Token hế hạn (thường là 1-2 tiếng), Client kích hoạt cơ chế cấp lại bằng cách gửi cặp `AccessToken` (có thể đã hết hạn) và `RefreshToken` còn hạn nạp vào DB.
 - BE kiểm tra cặp khóa này trùng khớp hoàn toàn trong Database. Nếu thỏa mãn, BE sinh lại Access Token + Refresh Token mới giúp người dùng không bị văng khỏi hệ thống. Vòng quay này lặp lại liên tục cho đến khi Refresh Token quá hạn (Ví dụ: sau 7 ngày không vào app).
 
+**C. Quy trình Quên Mật Khẩu (Forgot Password Flow)**
+- **Gửi Request (Step 1):** Client gọi API Gửi OTP cùng Email. BE kiểm tra và ẩn thông báo lỗi nếu email không tồn tại (chống Email Enumeration attack). Tạo và gửi OTP 6 số qua MailKit nếu hợp lệ. Giới hạn tần suất gọi.
+- **Xác thực OTP (Step 2):** Client nhập Email + OTP. BE xác minh vòng đời OTP và giới hạn nhập sai. Nếu trùng khớp, cấp đoạn mã `ResetToken` (JWT sống 10 phút mang claim `forgot_password`) đồng thời xóa OTP RAM. Server chạy Stateless, không lưu state trong DB.
+- **Thay đổi Mật khẩu (Step 3):** Client gửi `ResetToken` cùng Mật khẩu mới. BE giải mã token kiểm tra Claim và lấy Email. Tiến hành đổi mật khẩu mới trong DB. Tự động bắn một Job chạy nền (Fire-and-forget) báo qua Email: "Đổi mật khẩu thành công ✅" cho User.
+
 ---
 
 ## 2. 🔄 Luồng Đồng bộ hóa Dữ liệu (Cloud Sync Flow)
