@@ -98,16 +98,57 @@ public class IdentityService : IIdentityService
         return await GenerateAuthResponseAsync(user);
     }
 
+    /// <summary>
+    /// Changes the authenticated user's password.
+    /// Validates the current password, ensures new password differs,
+    /// revokes refresh tokens for security, and sends a notification email.
+    /// </summary>
     public async Task ChangePasswordAsync(string userId, ChangePasswordRequest request)
     {
         var user = await _userManager.FindByIdAsync(userId);
-        if (user == null) throw new Exception("User not found");
+        if (user == null)
+            throw new Exception("Không tìm thấy người dùng.");
 
+        // Verify current password is correct before proceeding
+        var isCurrentPasswordValid = await _userManager.CheckPasswordAsync(user, request.CurrentPassword);
+        if (!isCurrentPasswordValid)
+            throw new Exception("Mật khẩu hiện tại không chính xác.");
+
+        // Prevent setting the same password
+        if (request.CurrentPassword == request.NewPassword)
+            throw new Exception("Mật khẩu mới phải khác mật khẩu hiện tại.");
+
+        // Perform the password change
         var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (!result.Succeeded)
         {
-            throw new Exception(string.Join(", ", result.Errors.Select(e => e.Description)));
+            var errors = string.Join(", ", result.Errors.Select(e => e.Description));
+            throw new Exception($"Không thể đổi mật khẩu: {errors}");
         }
+
+        // Revoke refresh tokens — forces re-login on all devices for security
+        user.RefreshToken = null;
+        user.RefreshTokenExpiryTime = null;
+        await _userManager.UpdateAsync(user);
+
+        // Send notification email (fire-and-forget, do not block the response)
+        var userEmail = user.Email;
+        var userFullName = user.FullName ?? "bạn";
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var emailBody = BuildChangePasswordSuccessEmailBody(userFullName);
+                await _mailService.SendEmailAsync(
+                    userEmail!,
+                    "NoteVui - Mật khẩu đã được thay đổi 🔒",
+                    emailBody);
+            }
+            catch
+            {
+                // Silently ignore — email failure should not affect password change
+            }
+        });
     }
 
     public async Task UpdateProfileAsync(string userId, UpdateProfileRequest request)
@@ -927,6 +968,83 @@ public class IdentityService : IIdentityService
                             </div>
                             <p style='color:#94a3b8; font-size:13px; line-height:1.5; margin:16px 0 0;'>
                                 Cảm ơn bạn đã sử dụng NoteVui!
+                            </p>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style='background:#f8fafc; padding:20px 32px; text-align:center; border-top:1px solid #e2e8f0;'>
+                            <p style='color:#94a3b8; font-size:12px; margin:0;'>© 2026 NoteVui. All rights reserved.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>";
+    }
+
+    /// <summary>
+    /// Builds a professional HTML email notifying the user that their password
+    /// was changed via the in-app "Change Password" feature (not forgot-password).
+    /// Includes a timestamp and security warning.
+    /// </summary>
+    private static string BuildChangePasswordSuccessEmailBody(string fullName)
+    {
+        var changedAt = DateTime.UtcNow.AddHours(7).ToString("HH:mm - dd/MM/yyyy");
+
+        return $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+</head>
+<body style='margin:0; padding:0; background-color:#f4f7fa; font-family:Segoe UI, Arial, sans-serif;'>
+    <table width='100%' cellpadding='0' cellspacing='0' style='padding:40px 0;'>
+        <tr>
+            <td align='center'>
+                <table width='480' cellpadding='0' cellspacing='0' style='background:#ffffff; border-radius:16px; box-shadow:0 4px 24px rgba(0,0,0,0.08); overflow:hidden;'>
+                    <!-- Header -->
+                    <tr>
+                        <td style='background:linear-gradient(135deg, #3b82f6, #1d4ed8); padding:32px; text-align:center;'>
+                            <h1 style='color:#ffffff; margin:0; font-size:28px; font-weight:700;'>🔒 Đổi mật khẩu thành công</h1>
+                            <p style='color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:14px;'>Mật khẩu tài khoản của bạn đã được cập nhật</p>
+                        </td>
+                    </tr>
+                    <!-- Body -->
+                    <tr>
+                        <td style='padding:32px;'>
+                            <p style='color:#1e293b; font-size:16px; margin:0 0 16px;'>Xin chào <strong>{fullName}</strong>,</p>
+                            <p style='color:#475569; font-size:14px; line-height:1.6; margin:0 0 24px;'>
+                                Mật khẩu tài khoản NoteVui của bạn vừa được thay đổi thành công.
+                            </p>
+                            <!-- Change Details -->
+                            <div style='background:#eff6ff; border-radius:12px; padding:16px 20px; margin:0 0 24px;'>
+                                <table width='100%' cellpadding='0' cellspacing='0'>
+                                    <tr>
+                                        <td style='color:#1e40af; font-size:13px; font-weight:600; padding-bottom:6px;'>📋 Chi tiết thay đổi</td>
+                                    </tr>
+                                    <tr>
+                                        <td style='color:#3b82f6; font-size:13px;'>🕐 Thời gian: <strong>{changedAt} (GMT+7)</strong></td>
+                                    </tr>
+                                    <tr>
+                                        <td style='color:#3b82f6; font-size:13px; padding-top:4px;'>🔑 Hành động: Đổi mật khẩu từ ứng dụng</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <!-- Security Warning -->
+                            <div style='background:#fef2f2; border-left:4px solid #ef4444; padding:12px 16px; border-radius:0 8px 8px 0; margin:0 0 20px;'>
+                                <p style='color:#991b1b; font-size:13px; margin:0; font-weight:600;'>
+                                    🚨 Bạn không thực hiện thay đổi này?
+                                </p>
+                                <p style='color:#b91c1c; font-size:13px; margin:6px 0 0;'>
+                                    Nếu bạn KHÔNG thực hiện thay đổi này, tài khoản của bạn có thể đã bị xâm phạm. Vui lòng sử dụng chức năng 'Quên mật khẩu' để đặt lại mật khẩu ngay lập tức và liên hệ bộ phận hỗ trợ.
+                                </p>
+                            </div>
+                            <p style='color:#94a3b8; font-size:13px; line-height:1.5; margin:0;'>
+                                Cảm ơn bạn đã sử dụng NoteVui! 💙
                             </p>
                         </td>
                     </tr>
