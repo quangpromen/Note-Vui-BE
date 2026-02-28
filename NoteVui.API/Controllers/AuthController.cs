@@ -74,21 +74,39 @@ public class AuthController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Change the authenticated user's password.
+    /// Requires the current password for verification.
+    /// After success, all refresh tokens are revoked — the client must re-login.
+    /// A notification email is sent to the user.
+    /// </summary>
+    /// <param name="request">Current password, new password, and confirmation.</param>
     [Authorize]
     [HttpPost("change-password")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
     {
+        var userId = _currentUserService.UserId;
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized(new { message = "User not authenticated" });
+
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
         try
         {
-            var userId = _currentUserService.UserId;
-            if (userId == null) return Unauthorized();
-
             await _identityService.ChangePasswordAsync(userId, request);
-            return Ok(new { message = "Password changed successfully" });
+            return Ok(new
+            {
+                success = true,
+                message = "Đổi mật khẩu thành công. Vui lòng đăng nhập lại với mật khẩu mới."
+            });
         }
         catch (Exception ex)
         {
-            return BadRequest(new { message = ex.Message });
+            return BadRequest(new { success = false, message = ex.Message });
         }
     }
 
