@@ -32,6 +32,7 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
     // Membership System
     public DbSet<UserSubscription> UserSubscriptions { get; set; } = null!;
     public DbSet<PaymentTransaction> PaymentTransactions { get; set; } = null!;
+    public DbSet<SubscriptionRequest> SubscriptionRequests { get; set; } = null!;
 
     #endregion
 
@@ -60,6 +61,7 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
         // Membership System
         ConfigureUserSubscription(modelBuilder);
         ConfigurePaymentTransaction(modelBuilder);
+        ConfigureSubscriptionRequest(modelBuilder);
 
         // Seed data
         // SeedUsers(modelBuilder); // Removed for security
@@ -228,6 +230,36 @@ public class ApplicationDbContext : IdentityDbContext<AppUser>, IApplicationDbCo
             entity.HasIndex(e => e.TransactionCode, "IX_PaymentTransactions_TransactionCode").IsUnique();
             entity.HasIndex(e => e.UserId, "IX_PaymentTransactions_UserId");
             entity.HasIndex(e => new { e.UserId, e.Status }, "IX_PaymentTransactions_User_Status");
+        });
+    }
+
+    private static void ConfigureSubscriptionRequest(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<SubscriptionRequest>(entity =>
+        {
+            entity.ToTable("subscription_requests");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.UserId).IsRequired();
+            entity.Property(e => e.PlanType).HasConversion<int>().HasDefaultValue(PlanType.Free);
+            entity.Property(e => e.Status).HasConversion<int>().HasDefaultValue(RequestStatus.Pending);
+            entity.Property(e => e.Note).HasMaxLength(500);
+            entity.Property(e => e.AdminNote).HasMaxLength(500);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ProcessedByUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.ProcessedByUserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.UserId, "IX_SubscriptionRequests_UserId");
+            entity.HasIndex(e => e.Status, "IX_SubscriptionRequests_Status");
+            entity.HasIndex(e => new { e.UserId, e.Status }, "IX_SubscriptionRequests_User_Status");
         });
     }
 
