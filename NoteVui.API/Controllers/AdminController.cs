@@ -1,7 +1,10 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NoteVui.Application.DTOs.Admin;
+using SubscriptionDTOs = NoteVui.Application.DTOs.Subscription;
 using NoteVui.Application.Services.Interfaces;
+using NoteVui.Domain.Enums;
 
 namespace NoteVui.API.Controllers;
 
@@ -16,10 +19,12 @@ namespace NoteVui.API.Controllers;
 public class AdminController : ControllerBase
 {
     private readonly IAdminService _adminService;
+    private readonly ISubscriptionRequestService _subscriptionRequestService;
 
-    public AdminController(IAdminService adminService)
+    public AdminController(IAdminService adminService, ISubscriptionRequestService subscriptionRequestService)
     {
         _adminService = adminService;
+        _subscriptionRequestService = subscriptionRequestService;
     }
 
     /// <summary>
@@ -256,6 +261,100 @@ public class AdminController : ControllerBase
             {
                 success = true,
                 message = "Xử lý người dùng thành công.",
+                data = result
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // ==========================================
+    // SUBSCRIPTION REQUEST MANAGEMENT (Admin)
+    // ==========================================
+
+    /// <summary>
+    /// Gets a paginated list of subscription upgrade requests.
+    /// Supports filtering by status and searching by user email/name.
+    /// </summary>
+    /// <param name="status">Optional filter: 0=Pending, 1=Approved, 2=Rejected, 3=Cancelled.</param>
+    /// <param name="search">Optional search term (user email or name).</param>
+    /// <param name="page">Page number (1-based, default: 1).</param>
+    /// <param name="pageSize">Number of items per page (default: 10, max: 100).</param>
+    [HttpGet("subscription-requests")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetSubscriptionRequests(
+        [FromQuery] RequestStatus? status = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10)
+    {
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 10;
+        if (pageSize > 100) pageSize = 100;
+
+        var result = await _subscriptionRequestService.GetAdminRequestsAsync(status, search, page, pageSize);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Approves a pending subscription upgrade request.
+    /// This will activate the user's VIP subscription automatically.
+    /// </summary>
+    /// <param name="id">The request ID to approve.</param>
+    [HttpPost("subscription-requests/{id}/approve")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> ApproveSubscriptionRequest(int id)
+    {
+        var adminUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminUserId))
+            return Unauthorized(new { message = "Admin not authenticated" });
+
+        try
+        {
+            var result = await _subscriptionRequestService.ApproveRequestAsync(id, adminUserId);
+            return Ok(new
+            {
+                success = true,
+                message = $"Đã phê duyệt yêu cầu nâng cấp gói {result.PlanName} cho {result.UserFullName} thành công.",
+                data = result
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Rejects a pending subscription upgrade request with an optional reason.
+    /// </summary>
+    /// <param name="id">The request ID to reject.</param>
+    /// <param name="request">Optional rejection reason.</param>
+    [HttpPost("subscription-requests/{id}/reject")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> RejectSubscriptionRequest(int id, [FromBody] SubscriptionDTOs.RejectSubscriptionRequestDto? request)
+    {
+        var adminUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminUserId))
+            return Unauthorized(new { message = "Admin not authenticated" });
+
+        try
+        {
+            var result = await _subscriptionRequestService.RejectRequestAsync(id, adminUserId, request?.Reason);
+            return Ok(new
+            {
+                success = true,
+                message = $"Đã từ chối yêu cầu nâng cấp của {result.UserFullName}.",
                 data = result
             });
         }

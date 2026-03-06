@@ -19,15 +19,18 @@ public class SubscriptionController : ControllerBase
     private readonly IVipService _vipService;
     private readonly ICurrentUserService _currentUserService;
     private readonly IApplicationDbContext _context;
+    private readonly ISubscriptionRequestService _subscriptionRequestService;
 
     public SubscriptionController(
-        IVipService vipService, 
+        IVipService vipService,
         ICurrentUserService currentUserService,
-        IApplicationDbContext context)
+        IApplicationDbContext context,
+        ISubscriptionRequestService subscriptionRequestService)
     {
         _vipService = vipService;
         _currentUserService = currentUserService;
         _context = context;
+        _subscriptionRequestService = subscriptionRequestService;
     }
 
     /// <summary>
@@ -46,7 +49,7 @@ public class SubscriptionController : ControllerBase
             .FirstOrDefaultAsync(s => s.UserId == userId);
 
         var isVip = await _vipService.IsVipAsync(userId);
-        
+
         var response = new SubscriptionStatusResponse
         {
             IsVip = isVip,
@@ -54,8 +57,8 @@ public class SubscriptionController : ControllerBase
             Status = subscription?.Status.ToString(),
             StartDate = subscription?.StartDate,
             EndDate = subscription?.EndDate,
-            DaysRemaining = subscription != null && subscription.EndDate > DateTime.UtcNow 
-                ? (int)(subscription.EndDate - DateTime.UtcNow).TotalDays 
+            DaysRemaining = subscription != null && subscription.EndDate > DateTime.UtcNow
+                ? (int)(subscription.EndDate - DateTime.UtcNow).TotalDays
                 : null,
             IsAutoRenew = subscription?.IsAutoRenew ?? false
         };
@@ -75,7 +78,7 @@ public class SubscriptionController : ControllerBase
             return Unauthorized(new { message = "User not authenticated" });
 
         var isVip = await _vipService.IsVipAsync(userId);
-        
+
         return Ok(new { isVip });
     }
 
@@ -95,8 +98,8 @@ public class SubscriptionController : ControllerBase
 
         if (subscription == null)
         {
-            return Ok(new 
-            { 
+            return Ok(new
+            {
                 hasSubscription = false,
                 message = "No subscription found. User is on Free plan."
             });
@@ -115,8 +118,8 @@ public class SubscriptionController : ControllerBase
             UpdatedAt = subscription.UpdatedAt
         };
 
-        return Ok(new 
-        { 
+        return Ok(new
+        {
             hasSubscription = true,
             subscription = dto
         });
@@ -164,11 +167,100 @@ public class SubscriptionController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-        return Ok(new 
-        { 
+        return Ok(new
+        {
             message = $"Test subscription activated for {durationDays} days",
             planType = planType.ToString(),
             expiresAt = DateTime.UtcNow.AddDays(durationDays)
         });
     }
+
+    // ==========================================
+    // SUBSCRIPTION REQUEST ENDPOINTS (User)
+    // ==========================================
+
+    /// <summary>
+    /// Creates a new subscription upgrade request.
+    /// User must not have a pending request already.
+    /// </summary>
+    /// <param name="request">Request details (PlanType, Note).</param>
+    /// <returns>The created request details.</returns>
+    /// <remarks>
+    /// PlanType values:
+    /// - 1: PremiumMonthly
+    /// - 2: PremiumYearly
+    /// </remarks>
+    [HttpPost("requests")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> CreateRequest([FromBody] CreateSubscriptionRequestDto request)
+    {
+        var userId = _currentUserService.UserId;
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized(new { message = "User not authenticated" });
+
+        try
+        {
+            var result = await _subscriptionRequestService.CreateRequestAsync(userId, request);
+            return Ok(new
+            {
+                success = true,
+                message = "Yêu cầu nâng cấp đã được gửi thành công. Vui lòng chờ Admin phê duyệt.",
+                data = result
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Gets all subscription requests for the current user.
+    /// </summary>
+    /// <returns>List of subscription requests.</returns>
+    [HttpGet("requests/my")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetMyRequests()
+    {
+        var userId = _currentUserService.UserId;
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized(new { message = "User not authenticated" });
+
+        var result = await _subscriptionRequestService.GetUserRequestsAsync(userId);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Cancels a pending subscription request.
+    /// Only requests with status "Pending" can be cancelled.
+    /// </summary>
+    /// <param name="id">The request ID to cancel.</param>
+    [HttpPut("requests/{id}/cancel")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> CancelRequest(int id)
+    {
+        var userId = _currentUserService.UserId;
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized(new { message = "User not authenticated" });
+
+        try
+        {
+            await _subscriptionRequestService.CancelRequestAsync(userId, id);
+            return Ok(new
+            {
+                success = true,
+                message = "Đã hủy yêu cầu nâng cấp thành công."
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }
+

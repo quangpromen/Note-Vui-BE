@@ -17,10 +17,11 @@ public interface IApplicationDbContext
     DbSet<AiProvider> AiProviders { get; set; }
     DbSet<AiModel> AiModels { get; set; }
     DbSet<AiUsageLog> AiUsageLogs { get; set; }
-    
+
     // Membership System
     DbSet<UserSubscription> UserSubscriptions { get; set; }
     DbSet<PaymentTransaction> PaymentTransactions { get; set; }
+    DbSet<SubscriptionRequest> SubscriptionRequests { get; set; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -137,6 +137,7 @@ builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IVipService, VipService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>();
+builder.Services.AddScoped<ISubscriptionRequestService, SubscriptionRequestService>();
 builder.Services.AddHttpContextAccessor();
 
 // OTP Service - Singleton (in-memory store must persist across requests)
