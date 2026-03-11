@@ -25,8 +25,9 @@ public class VipService : IVipService
 
         var activeSubscription = await _context.UserSubscriptions
             .AsNoTracking()
-            .Where(s => s.UserId == userId 
-                        && s.Status == SubscriptionStatus.Active 
+            .Where(s => s.UserId == userId
+                        && s.Status == SubscriptionStatus.Active
+                        && s.PlanType != PlanType.Free
                         && s.EndDate > DateTime.UtcNow)
             .FirstOrDefaultAsync();
 
@@ -41,8 +42,9 @@ public class VipService : IVipService
 
         var activeSubscription = _context.UserSubscriptions
             .AsNoTracking()
-            .Where(s => s.UserId == userId 
-                        && s.Status == SubscriptionStatus.Active 
+            .Where(s => s.UserId == userId
+                        && s.Status == SubscriptionStatus.Active
+                        && s.PlanType != PlanType.Free
                         && s.EndDate > DateTime.UtcNow)
             .FirstOrDefault();
 
