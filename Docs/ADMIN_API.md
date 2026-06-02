@@ -1,80 +1,104 @@
-# 🛠 NoteVui Admin Portal - API Technical Specification
+# NoteVui Admin API
 
-Tài liệu này cung cấp chi tiết kỹ thuật về các API dành cho hệ thống Admin của NoteVui. Tài liệu được thiết kế đặc biệt để các AI (như Claude, GPT) có thể đọc và tạo mã nguồn Front-end (React/Vite/Tailwind) một cách chính xác nhất.
+Tài liệu API cho Admin Portal.
 
----
+Base URL: `/api/admin`
 
-## 1. Thông tin chung (General Information)
+Yêu cầu chung:
 
-- **Base URL**: `http://localhost:5000` (Môi trường Development)
-- **Content-Type**: `application/json`
-- **Authentication**: JWT Bearer Token.
-- **Role Required**: `Admin`
+```http
+Authorization: Bearer {adminAccessToken}
+Content-Type: application/json
+```
 
-### Luồng xác thực (Auth Flow):
-1. **Login**: Gửi thông tin tới `POST /api/auth/login`.
-2. **Token**: Nhận về `accessToken` và lưu vào `localStorage`.
-3. **Authorization**: Gắn Header `Authorization: Bearer {token}` vào mọi yêu cầu tới module Admin.
-4. **Role Check**: Giải mã JWT (Sử dụng `jwt-decode`) để kiểm tra claim `role` có chứa `Admin` không trước khi cho vào Dashboard.
+Tất cả endpoint trong `AdminController` yêu cầu role `Admin`.
 
----
+## 1. Auth Flow Cho Admin
 
-## 2. Chi tiết các Endpoint (Endpoint Deep Dive)
+1. Admin gọi `POST /api/auth/login`.
+2. Backend trả `accessToken`, `refreshToken`.
+3. Frontend lưu token và gửi header `Authorization: Bearer {accessToken}`.
+4. API `/api/admin/*` chỉ cho phép token có role `Admin`.
 
-### 2.1. Thống kê tổng quan (Dashboard Stats)
-Cung cấp các con số "Key Metrics" để hiển thị trên các thẻ (Cards) ở trang chủ Admin.
+Lưu ý:
 
-- **Endpoint**: `GET /api/admin/stats`
-- **Visual Mapping**: Hiển thị thành 4 Stats Cards với icon khác nhau.
-- **Success Response (200 OK)**:
+- Auth endpoints bị `AuthLimiter`: 5 requests/phút theo IP.
+- Nếu đăng nhập sai 5 lần, account bị lock 15 phút.
+- Các API khác vẫn chịu `GlobalLimiter`.
+
+## 2. Dashboard Stats
+
+`GET /api/admin/stats`
+
+Response:
+
 ```json
 {
-  "totalRevenue": 1500000.00,  // Decimal: Hiển thị với format tiền tệ (VND)
-  "totalUsers": 120,           // Integer: Tổng user đăng ký
-  "activePremiumUsers": 15,    // Integer: User đang có gói VIP
-  "totalAiRequests": 450       // Integer: Tổng số lần gọi AI Note
+  "totalRevenue": 1500000.0,
+  "totalUsers": 120,
+  "activePremiumUsers": 15,
+  "totalAiRequests": 450
 }
 ```
 
-### 2.2. Quản lý người dùng (User Management)
-Danh sách người dùng hỗ trợ tìm kiếm và phân trang theo chuẩn Server-side.
+Field:
 
-- **Endpoint**: `GET /api/admin/users`
-- **Query Parameters**:
-  - `search`: `string` (Optional) - Tìm theo Email hoặc Tên.
-  - `page`: `int` (Default: 1) - Số trang hiện tại.
-  - `pageSize`: `int` (Default: 10) - Số bản ghi mỗi trang.
-- **Visual Mapping**: Hiển thị dạng Table với Pagination và Search bar.
-- **Success Response (200 OK)**:
+| Field | Type | Mô tả |
+| --- | --- | --- |
+| `totalRevenue` | decimal | Tổng doanh thu từ transaction success |
+| `totalUsers` | int | Tổng user, không tính Admin |
+| `activePremiumUsers` | int | User premium đang active và chưa hết hạn |
+| `totalAiRequests` | int | Tổng request AI |
+
+## 3. User Management
+
+### 3.1 Get Users
+
+`GET /api/admin/users?search=user&page=1&pageSize=10`
+
+Query:
+
+| Param | Type | Default | Mô tả |
+| --- | --- | --- | --- |
+| `search` | string? | null | Tìm theo email hoặc fullName |
+| `page` | int | 1 | Trang hiện tại |
+| `pageSize` | int | 10 | Tối đa 100 |
+
+Response:
+
 ```json
 {
   "items": [
     {
-      "id": "string (guid)",
+      "id": "user-id",
       "email": "user@example.com",
-      "fullName": "Nguyễn Văn A",
-      "planName": "Free | Premium (Month) | Premium (Year)",
-      "joinDate": "2024-02-01T10:00:00Z",
+      "fullName": "Nguyen Van A",
+      "planName": "Free",
+      "joinDate": "2026-06-02T00:00:00Z",
       "isLocked": false
     }
   ],
-  "totalCount": 120,
+  "totalCount": 1,
   "pageIndex": 1,
   "pageSize": 10,
-  "totalPages": 12
+  "totalPages": 1
 }
 ```
 
-### 2.3. Hành động: Khóa/Mở khóa tài khoản
-- **Endpoint**: `POST /api/admin/users/{id}/lock`
-- **Visual Mapping**: Nút bấm (Switch hoặc Button) trong cột "Thao tác" của bảng User. Màu đỏ cho "Khóa", Màu xanh cho "Mở".
-- **Request Body**:
+### 3.2 Lock Or Unlock User
+
+`POST /api/admin/users/{id}/lock`
+
+Request:
+
 ```json
 {
-  "lock": true // true để khóa, false để mở khóa
+  "lock": true
 }
 ```
-- **Response**:
+
+Response:
+
 ```json
 {
   "success": true,
@@ -82,86 +106,23 @@ Danh sách người dùng hỗ trợ tìm kiếm và phân trang theo chuẩn Se
 }
 ```
 
-### 2.4. Xem thông tin VIP của người dùng
-- **Endpoint**: `GET /api/admin/users/{id}/subscription`
-- **Visual Mapping**: Hiển thị trong Modal hoặc Panel chi tiết khi click vào user.
-- **Success Response (200 OK)**:
+Quy tắc:
+
+- `lock = true`: đặt `LockoutEnd` rất xa trong tương lai.
+- `lock = false`: xóa lockout.
+
+### 3.3 Get User Detail
+
+`GET /api/admin/users/{id}/detail`
+
+Response:
+
 ```json
 {
-  "id": 1,
-  "userId": "user-guid-string",
+  "userId": "user-id",
   "email": "user@example.com",
-  "fullName": "Nguyễn Văn A",
-  "planType": "Free | PremiumMonthly | PremiumYearly",
-  "status": "Active | Cancelled | Expired",
-  "startDate": "2024-02-01T10:00:00Z",
-  "endDate": "2024-03-01T10:00:00Z",
-  "isAutoRenew": false,
-  "isActive": true
-}
-```
-- **Error Response (404 Not Found)**:
-```json
-{
-  "message": "Không tìm thấy người dùng."
-}
-```
-
-### 2.5. Kích hoạt/Điều chỉnh VIP cho người dùng
-- **Endpoint**: `PUT /api/admin/users/{id}/subscription`
-- **Visual Mapping**: Form Modal với dropdown chọn Plan và Date picker cho ngày hết hạn.
-- **Request Body**:
-```json
-{
-  "planType": 1,           // 0: Free, 1: PremiumMonthly, 2: PremiumYearly
-  "endDate": "2024-12-01T00:00:00Z",  // Optional: Ngày hết hạn tùy chỉnh
-  "isAutoRenew": false     // Optional: Tự động gia hạn
-}
-```
-- **Lưu ý về `endDate`**: Nếu không truyền, hệ thống sẽ tự tính:
-  - `Free`: 100 năm
-  - `PremiumMonthly`: 1 tháng từ hiện tại
-  - `PremiumYearly`: 1 năm từ hiện tại
-- **Email Notification**: Khi người dùng được cấp hoặc gia hạn gói Premium (VIP), hệ thống sẽ tự động gửi một email thông báo chuyên nghiệp (HTML, Tiếng Việt) tới địa chỉ email của người dùng.
-
-- **Success Response (200 OK)**:
-```json
-{
-  "success": true,
-  "message": "Đã cập nhật gói Premium (Tháng) cho người dùng thành công.",
-  "data": {
-    "id": 1,
-    "userId": "user-guid-string",
-    "email": "user@example.com",
-    "fullName": "Nguyễn Văn A",
-    "planType": "PremiumMonthly",
-    "status": "Active",
-    "startDate": "2024-02-07T10:00:00Z",
-    "endDate": "2024-03-07T10:00:00Z",
-    "isAutoRenew": false,
-    "isActive": true
-  }
-}
-```
-- **Error Response (400 Bad Request)**:
-```json
-{
-  "message": "PlanType không hợp lệ. Giá trị hợp lệ: 0 (Free), 1 (PremiumMonthly), 2 (PremiumYearly)."
-}
-```
-
-### 2.6. Xem chi tiết người dùng (User Detail)
-Xem toàn bộ thông tin chi tiết của một user, bao gồm subscription, notes stats, AI usage, và trạng thái tài khoản.
-
-- **Endpoint**: `GET /api/admin/users/{id}/detail`
-- **Visual Mapping**: Trang chi tiết user hoặc Modal lớn khi click vào user trong bảng.
-- **Success Response (200 OK)**:
-```json
-{
-  "userId": "user-guid-string",
-  "email": "user@example.com",
-  "fullName": "Nguyễn Văn A",
-  "avatarUrl": "https://image-url.com/avatar.jpg",
+  "fullName": "Nguyen Van A",
+  "avatarUrl": null,
   "isLocked": false,
   "lockoutEnd": null,
   "subscription": {
@@ -171,9 +132,9 @@ Xem toàn bộ thông tin chi tiết của một user, bao gồm subscription, n
     "planTypeValue": 1,
     "isVip": true,
     "status": "Active",
-    "startDate": "2024-02-01T10:00:00Z",
-    "endDate": "2024-03-01T10:00:00Z",
-    "daysRemaining": 22,
+    "startDate": "2026-06-01T00:00:00Z",
+    "endDate": "2026-07-01T00:00:00Z",
+    "daysRemaining": 29,
     "isAutoRenew": false
   },
   "totalNotes": 50,
@@ -189,227 +150,319 @@ Xem toàn bộ thông tin chi tiết của một user, bao gồm subscription, n
 }
 ```
 
-### 2.7. Sửa thông tin người dùng (Edit User Profile)
-Admin có thể sửa FullName, Email, AvatarUrl của user. Admin có quyền đổi email - quyền mà user thường không có.
+### 3.4 Edit User Profile
 
-- **Endpoint**: `PUT /api/admin/users/{id}/profile`
-- **Visual Mapping**: Form Modal chỉnh sửa thông tin.
-- **Request Body**:
+`PUT /api/admin/users/{id}/profile`
+
+Request:
+
 ```json
 {
-  "fullName": "Nguyễn Văn B",
-  "email": "newemail@example.com",
-  "avatarUrl": "https://image-url.com/avatar.jpg"
+  "fullName": "Nguyen Van B",
+  "email": "new-email@example.com",
+  "avatarUrl": "https://example.com/avatar.png"
 }
 ```
-- **Request Validation**:
-  - `fullName`: Required, max 100 ký tự
-  - `email`: Required, phải đúng định dạng email
-  - `avatarUrl`: Optional (nullable)
 
-- **Success Response (200 OK)**:
+Validation:
+
+- `fullName`: required, max 100 ký tự.
+- `email`: required, email format.
+- `avatarUrl`: optional.
+
+Response:
+
 ```json
 {
   "success": true,
   "message": "Đã cập nhật thông tin người dùng thành công.",
   "data": {
-    "userId": "user-guid-string",
-    "email": "newemail@example.com",
-    "fullName": "Nguyễn Văn B",
-    "avatarUrl": "https://image-url.com/avatar.jpg",
+    "userId": "user-id",
+    "email": "new-email@example.com",
+    "fullName": "Nguyen Van B",
+    "avatarUrl": "https://example.com/avatar.png",
     "isLocked": false,
     "lockoutEnd": null,
-    "subscription": { ... },
-    "totalNotes": 50,
-    "activeNotes": 42,
-    "deletedNotes": 8,
-    "pinnedNotes": 5,
-    "aiUsage": { ... }
+    "subscription": {},
+    "totalNotes": 10,
+    "activeNotes": 8,
+    "deletedNotes": 2,
+    "pinnedNotes": 1,
+    "aiUsage": {}
   }
 }
 ```
-- **Error Response (400 Bad Request)** - Email trùng:
+
+### 3.5 Create User
+
+`POST /api/admin/users`
+
+Request:
+
 ```json
 {
-  "message": "Email đã được sử dụng bởi tài khoản khác."
-}
-```
-
-### 2.8. Tạo người dùng mới (Create User)
-Dùng để Admin chủ động tạo thêm User vào hệ thống.
-Nếu Email đã tồn tại, hệ thống không tạo mới mà trả về thông tin User hiện tại (không báo lỗi).
-
-- **Endpoint**: `POST /api/admin/users`
-- **Visual Mapping**: Form Modal (Thêm mới) có các trường Email, Password, FullName, AvatarUrl (Tùy chọn).
-- **Request Body**:
-```json
-{
-  "email": "newuser@example.com",
+  "email": "new-user@example.com",
   "password": "Password123!",
-  "fullName": "Người Dùng Mới",
-  "avatarUrl": "https://image-url.com/avatar.jpg"
+  "fullName": "New User",
+  "avatarUrl": null
 }
 ```
-- **Request Validation**:
-  - `email`: Required, định dạng email.
-  - `password`: Required, ít nhất 6 ký tự.
-  - `fullName`: Required, max 100 ký tự.
-  - `avatarUrl`: Optional (nullable).
 
-- **Success Response (200 OK)**:
+Quy tắc:
+
+- Nếu email đã tồn tại, backend không tạo duplicate mà trả detail user hiện có.
+- Password tối thiểu 6 ký tự theo DTO hiện tại.
+
+Response:
+
 ```json
 {
   "success": true,
   "message": "Xử lý người dùng thành công.",
   "data": {
-    "userId": "user-guid-string",
-    "email": "newuser@example.com",
-    "fullName": "Người Dùng Mới",
-    "avatarUrl": "https://image-url.com/avatar.jpg",
+    "userId": "new-user-id",
+    "email": "new-user@example.com",
+    "fullName": "New User",
+    "avatarUrl": null,
     "isLocked": false,
     "lockoutEnd": null,
-    "subscription": null,
+    "subscription": {},
     "totalNotes": 0,
     "activeNotes": 0,
     "deletedNotes": 0,
     "pinnedNotes": 0,
-    "aiUsage": null
+    "aiUsage": {}
   }
 }
 ```
-- **Error Response (400 Bad Request)**: Lỗi Validation.
 
----
+## 4. User Subscription Management
 
-## 3. Cấu trúc Schema DTO (Data Models)
+### 4.1 Get User Subscription
+
+`GET /api/admin/users/{id}/subscription`
+
+Response:
+
+```json
+{
+  "id": 1,
+  "userId": "user-id",
+  "email": "user@example.com",
+  "fullName": "Nguyen Van A",
+  "planType": "PremiumMonthly",
+  "status": "Active",
+  "startDate": "2026-06-01T00:00:00Z",
+  "endDate": "2026-07-01T00:00:00Z",
+  "isAutoRenew": false,
+  "isActive": true
+}
+```
+
+### 4.2 Set User Subscription
+
+`PUT /api/admin/users/{id}/subscription`
+
+Request:
+
+```json
+{
+  "planType": 1,
+  "endDate": "2026-07-01T00:00:00Z",
+  "isAutoRenew": false
+}
+```
+
+PlanType:
+
+| Value | Name |
+| --- | --- |
+| 0 | Free |
+| 1 | PremiumMonthly |
+| 2 | PremiumYearly |
+
+Nếu `endDate` không truyền:
+
+- Free: cộng 100 năm.
+- PremiumMonthly: cộng 1 tháng.
+- PremiumYearly: cộng 1 năm.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Đã cập nhật gói Premium (Tháng) cho người dùng thành công.",
+  "data": {
+    "id": 1,
+    "userId": "user-id",
+    "email": "user@example.com",
+    "fullName": "Nguyen Van A",
+    "planType": "PremiumMonthly",
+    "status": "Active",
+    "startDate": "2026-06-02T00:00:00Z",
+    "endDate": "2026-07-02T00:00:00Z",
+    "isAutoRenew": false,
+    "isActive": true
+  }
+}
+```
+
+## 5. Subscription Request Management
+
+### 5.1 Get Requests
+
+`GET /api/admin/subscription-requests?status=0&search=user&page=1&pageSize=10`
+
+Query:
+
+| Param | Type | Mô tả |
+| --- | --- | --- |
+| `status` | RequestStatus? | Optional filter |
+| `search` | string? | Tìm theo email/fullName |
+| `page` | int | Mặc định 1 |
+| `pageSize` | int | Mặc định 10, tối đa 100 |
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "id": 10,
+      "userId": "user-id",
+      "userEmail": "user@example.com",
+      "userFullName": "Nguyen Van A",
+      "userAvatarUrl": null,
+      "planType": "PremiumMonthly",
+      "planName": "Premium (Tháng)",
+      "status": "Pending",
+      "note": "Đã chuyển khoản ABC123",
+      "adminNote": null,
+      "processedByUserName": null,
+      "processedAt": null,
+      "createdAt": "2026-06-02T00:00:00Z"
+    }
+  ],
+  "totalCount": 1,
+  "pageIndex": 1,
+  "pageSize": 10,
+  "totalPages": 1
+}
+```
+
+### 5.2 Approve Request
+
+`POST /api/admin/subscription-requests/{id}/approve`
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Đã phê duyệt yêu cầu nâng cấp gói Premium (Tháng) cho Nguyen Van A thành công.",
+  "data": {
+    "id": 10,
+    "userId": "user-id",
+    "userEmail": "user@example.com",
+    "userFullName": "Nguyen Van A",
+    "planType": "PremiumMonthly",
+    "planName": "Premium (Tháng)",
+    "status": "Approved",
+    "note": "Đã chuyển khoản ABC123",
+    "adminNote": null,
+    "processedByUserName": "Admin",
+    "processedAt": "2026-06-02T00:10:00Z",
+    "createdAt": "2026-06-02T00:00:00Z"
+  }
+}
+```
+
+Approve sẽ kích hoạt hoặc cập nhật subscription của user.
+
+### 5.3 Reject Request
+
+`POST /api/admin/subscription-requests/{id}/reject`
+
+Request:
+
+```json
+{
+  "reason": "Chưa nhận được thanh toán."
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Đã từ chối yêu cầu nâng cấp của Nguyen Van A.",
+  "data": {
+    "id": 10,
+    "status": "Rejected",
+    "adminNote": "Chưa nhận được thanh toán.",
+    "processedAt": "2026-06-02T00:10:00Z"
+  }
+}
+```
+
+## 6. DTO Reference
 
 ### AdminDashboardStatsDto
-| Trường | Kiểu dữ liệu | Mô tả |
-| :--- | :--- | :--- |
-| `totalRevenue` | `decimal` | Tổng doanh thu hệ thống |
-| `totalUsers` | `int` | Số lượng người dùng |
-| `activePremiumUsers`| `int` | Người dùng trả phí đang hoạt động |
-| `totalAiRequests` | `int` | Tổng lưu lượng AI |
+
+| Field | Type |
+| --- | --- |
+| `totalRevenue` | decimal |
+| `totalUsers` | int |
+| `activePremiumUsers` | int |
+| `totalAiRequests` | int |
 
 ### UserSummaryDto
-| Trường | Kiểu dữ liệu | Mô tả |
-| :--- | :--- | :--- |
-| `id` | `string` | ID duy nhất của user |
-| `email` | `string` | Địa chỉ email |
-| `fullName` | `string` | Tên đầy đủ |
-| `planName` | `string` | Các giá trị: `Free`, `Premium (Month)`, `Premium (Year)`, `(Expired)` |
-| `joinDate` | `DateTime` | Hiện tại đang trả về giá trị mặc định của server (Sẽ cập nhật sau). |
-| `isLocked` | `bool` | Xác định dựa trên `LockoutEnd` > hiện tại. |
+
+| Field | Type |
+| --- | --- |
+| `id` | string |
+| `email` | string |
+| `fullName` | string |
+| `planName` | string |
+| `joinDate` | DateTime |
+| `isLocked` | bool |
 
 ### SetUserSubscriptionRequest
-| Trường | Kiểu dữ liệu | Mô tả |
-| :--- | :--- | :--- |
-| `planType` | `int` | 0: Free, 1: PremiumMonthly, 2: PremiumYearly |
-| `endDate` | `DateTime?` | (Optional) Ngày hết hạn tùy chỉnh |
-| `isAutoRenew` | `bool` | (Optional, default: false) Tự động gia hạn |
 
-### UserSubscriptionDto
-| Trường | Kiểu dữ liệu | Mô tả |
-| :--- | :--- | :--- |
-| `id` | `int` | ID của subscription |
-| `userId` | `string` | ID của user |
-| `email` | `string` | Địa chỉ email |
-| `fullName` | `string` | Tên đầy đủ |
-| `planType` | `string` | Loại gói: `Free`, `PremiumMonthly`, `PremiumYearly` |
-| `status` | `string` | Trạng thái: `Active`, `Cancelled`, `Expired` |
-| `startDate` | `DateTime` | Ngày bắt đầu subscription |
-| `endDate` | `DateTime` | Ngày hết hạn subscription |
-| `isAutoRenew` | `bool` | Có tự động gia hạn không |
-| `isActive` | `bool` | Subscription có đang hoạt động (Premium + Chưa hết hạn) |
+| Field | Type |
+| --- | --- |
+| `planType` | int |
+| `endDate` | DateTime? |
+| `isAutoRenew` | bool |
 
-### AdminUserDetailDto (MỚI)
-| Trường | Kiểu dữ liệu | Mô tả |
-| :--- | :--- | :--- |
-| `userId` | `string` | ID duy nhất |
-| `email` | `string` | Địa chỉ email |
-| `fullName` | `string` | Tên đầy đủ |
-| `avatarUrl` | `string?` | URL avatar (nullable) |
-| `isLocked` | `bool` | Tài khoản đang bị khóa |
-| `lockoutEnd` | `DateTimeOffset?` | Thời điểm hết khóa |
-| `subscription` | `AdminUserSubscriptionInfo` | Thông tin gói (xem bảng dưới) |
-| `totalNotes` | `int` | Tổng notes (gồm đã xóa) |
-| `activeNotes` | `int` | Notes đang hoạt động |
-| `deletedNotes` | `int` | Notes trong thùng rác |
-| `pinnedNotes` | `int` | Notes đã ghim |
-| `aiUsage` | `AdminAiUsageStats` | Thống kê AI usage |
+### AdminEditUserRequest
 
-### AdminUserSubscriptionInfo
-| Trường | Kiểu dữ liệu | Mô tả |
-| :--- | :--- | :--- |
-| `subscriptionId` | `int?` | ID subscription (null nếu Free) |
-| `planName` | `string` | "Free", "Premium (Tháng)", "Premium (Năm)" |
-| `planType` | `string` | "Free", "PremiumMonthly", "PremiumYearly" |
-| `planTypeValue` | `int` | 0, 1, 2 - dùng cho dropdown select |
-| `isVip` | `bool` | Đang có gói premium hoạt động |
-| `status` | `string?` | "Active", "Cancelled", "Expired" |
-| `startDate` | `DateTime?` | Ngày bắt đầu |
-| `endDate` | `DateTime?` | Ngày hết hạn |
-| `daysRemaining` | `int?` | Số ngày còn lại |
-| `isAutoRenew` | `bool` | Tự động gia hạn |
+| Field | Type |
+| --- | --- |
+| `fullName` | string |
+| `email` | string |
+| `avatarUrl` | string? |
 
-### AdminEditUserRequest (MỚI)
-| Trường | Kiểu dữ liệu | Mô tả |
-| :--- | :--- | :--- |
-| `fullName` | `string` | Required, max 100 ký tự |
-| `email` | `string` | Required, định dạng email |
-| `avatarUrl` | `string?` | Optional (nullable) |
+### AdminCreateUserRequest
 
-### AdminCreateUserRequest (MỚI)
-| Trường | Kiểu dữ liệu | Mô tả |
-| :--- | :--- | :--- |
-| `email` | `string` | Required, định dạng email |
-| `password` | `string` | Required, tối thiểu 6 ký tự |
-| `fullName` | `string` | Required, max 100 ký tự |
-| `avatarUrl` | `string?` | Optional (nullable) |
+| Field | Type |
+| --- | --- |
+| `email` | string |
+| `password` | string |
+| `fullName` | string |
+| `avatarUrl` | string? |
 
----
+## 7. Error Codes
 
-## 4. Giao thức Kỹ thuật (Technical Nuances)
+| Status | Ý nghĩa |
+| --- | --- |
+| 400 | Validation hoặc business rule lỗi |
+| 401 | Thiếu/sai token |
+| 403 | Không có role Admin |
+| 404 | Không tìm thấy user/request |
+| 429 | Vượt rate limit/global limiter |
+| 500 | Lỗi server |
 
-- **Pagination**: Mặc định là trang 1, 10 bản ghi. Tổng số bản ghi nằm trong `totalCount`.
-- **Search**: Case-insensitive, tìm kiếm theo Email hoặc FullName.
-- **Locking Indefinitely**: Khi khóa một user, hệ thống đặt `LockoutEnd` lên mức tối đa (`9999-12-31`).
-- **Revenue Calculation**: Chỉ tính từ các giao dịch có trạng thái `Success`.
-- **Email Change**: Chỉ Admin mới có quyền đổi email cho user. User thường chỉ đổi được FullName và AvatarUrl.
-
----
-
-## 5. Gợi ý giao diện cho AI (UI/UX Specification)
-
-Nếu bạn sử dụng AI để tạo Front-end, hãy cung cấp các yêu cầu sau:
-1. **Framework**: React JS with Vite.
-2. **Styling**: Tailwind CSS.
-3. **Icons**: Lucide React.
-4. **State Management**: React Query (TanStack Query) cho việc fetch dữ liệu Admin.
-5. **Components**:
-   - Sidebar: Chứa điều hướng (Dashboard, Users, Settings).
-   - Topbar: Hiển thị Profile Admin và nút Logout.
-   - Dashboard: Grid 4 cột cho Stats, kèm theo biểu đồ (nếu cần).
-   - User List: Table với Search, Filter Plan, và nút Lock/Unlock táo bạo.
-   - User Detail: Trang/Modal chi tiết với tabs (Info, Subscription, Stats).
-   - Edit User: Form Modal cho Admin sửa thông tin user.
-
----
-
-## 6. PROMPT MẪU ĐỂ GỬI CHO AI TẠO FE
-*Copy đoạn dưới đây gửi cho AI để tạo giao diện Admin:*
-
-> "Dựa trên tài liệu API đính kèm, hãy xây dựng một Dashboard Admin chuyên nghiệp bằng React JS, Tailwind CSS và Lucide Icons.
-> Yêu cầu:
-> 1. Dashboard chính có 4 thẻ thống kê: Doanh thu, Tổng User, User Premium, Lượt dùng AI.
-> 2. Trang Quản lý User có bảng dữ liệu hỗ trợ phân trang và tìm kiếm.
-> 3. Cột 'Trạng thái' trong bảng User hiển thị Badge cho Plan (Free/Premium).
-> 4. Có nút 'Khóa/Mở khóa' người dùng bằng Dialog xác nhận.
-> 5. Click vào row user mở trang/modal chi tiết hiển thị đầy đủ thông tin (notes stats, AI usage, subscription).
-> 6. Có form edit thông tin user (FullName, Email, Avatar) cho Admin.
-> 7. Sử dụng Axios để gọi API và quản lý state bằng React Query.
-> 8. Code sạch, chia component rõ ràng (StatsCard, UserTable, UserDetail, Layout, Sidebar).
-> 9. Tông màu chủ đạo: Slate & Indigo đậm chất SaaS."
-
----
-*Cập nhật lần cuối: 25/02/2026*
+Last updated: 2026-06-02

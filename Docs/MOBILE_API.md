@@ -1,427 +1,554 @@
-# 📱 Mobile API Documentation - NoteVui
+# NoteVui Mobile API
 
-This documentation provides detailed JSON payloads and endpoint specifications for the NoteVui Android/Mobile client. 
+Tài liệu API cho mobile client. Base path mặc định: `/api`.
 
----
+## 1. Quy Ước Chung
 
-## 🚀 General Information
-- **Base URL:** `https://api.notevui.com/api` (Production) or `http://10.0.2.2:5000/api` (Android Emulator)
-- **Auth:** `Bearer {Token}` in the `Authorization` header for all protected endpoints.
-- **Content-Type:** `application/json`
+Base URL:
 
----
+- Production: `https://api.notevui.com/api`
+- Android emulator development: `http://10.0.2.2:5000/api`
+- Localhost development: `http://localhost:5000/api`
 
-## 🔐 Authentication & Account (`api/auth`)
+Headers:
 
-### 1. Register (3-Step OTP Flow)
-User registration now requires email verification via OTP before account creation.
+```http
+Content-Type: application/json
+Authorization: Bearer {accessToken}
+```
 
-#### Step 1: Send OTP
-Send a 6-digit OTP to the user's email.
-- **Method:** `POST`
-- **Endpoint:** `/api/auth/register/send-otp`
-- **Request Body:**
+Các endpoint được bảo vệ yêu cầu `Authorization`. Auth endpoints công khai trừ `change-password`, `profile`, `logout`.
+
+## 2. Rate Limit Và Lockout
+
+### Rate limit
+
+Auth endpoints dùng `AuthLimiter`: tối đa 5 requests/phút theo IP.
+
+Notes, Sync và UserProfile dùng `ApiLimiter`: token bucket theo UserId nếu đã đăng nhập, fallback IP nếu chưa đăng nhập.
+
+Khi vượt giới hạn:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 60
+Content-Type: application/problem+json
+```
+
+```json
+{
+  "type": "https://www.rfc-editor.org/rfc/rfc6585#section-4",
+  "title": "Too Many Requests",
+  "status": 429,
+  "detail": "Tần suất gửi yêu cầu quá nhanh. Vui lòng thử lại sau.",
+  "instance": "/api/auth/login"
+}
+```
+
+### Account lockout
+
+Nếu login sai mật khẩu 5 lần, tài khoản bị khóa 15 phút. Client nên hiển thị thông báo generic, không nên spam retry vì request login vẫn bị rate limit.
+
+## 3. Auth API
+
+### 3.1 Register trực tiếp
+
+`POST /api/auth/register`
+
+Request:
+
 ```json
 {
   "email": "user@example.com",
+  "password": "Password123!",
   "fullName": "Nguyen Van A"
 }
 ```
-- **Success Response (200 OK):**
+
+Response `200`:
+
 ```json
 {
-  "success": true,
-  "message": "Mã OTP đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư (bao gồm thư rác)."
+  "accessToken": "jwt",
+  "refreshToken": "refresh-token",
+  "userId": "user-id",
+  "email": "user@example.com",
+  "fullName": "Nguyen Van A",
+  "avatarUrl": null
 }
 ```
-- **Error Response (429 Too Many Requests):** Gửi quá nhiều OTP trong 10 phút.
 
-#### Step 2: Verify OTP
-Verify the 6-digit OTP. Returns a `registrationToken` (valid 10 minutes).
-- **Method:** `POST`
-- **Endpoint:** `/api/auth/register/verify-otp`
-- **Request Body:**
+### 3.2 Login
+
+`POST /api/auth/login`
+
+Request:
+
 ```json
 {
   "email": "user@example.com",
-  "otp": "123456"
+  "password": "Password123!"
 }
 ```
-- **Success Response (200 OK):**
+
+Response `200`: giống `Register`.
+
+Response thường gặp:
+
+- `401`: email/password sai hoặc account bị khóa.
+- `429`: vượt rate limit.
+
+### 3.3 Google Login
+
+`POST /api/auth/google-login`
+
+Request:
+
 ```json
 {
-  "success": true,
-  "message": "Xác nhận OTP thành công.",
-  "registrationToken": "eyJhbGciOiJIUzI1NiI..."
+  "idToken": "google-id-token"
 }
 ```
-- **Error (400):** OTP sai, hết hạn, hoặc nhập sai quá nhiều lần.
-- **Error (429):** Nhập sai quá 5 lần → yêu cầu mã mới.
 
-#### Step 3: Complete Registration
-Use `registrationToken` + password + fullName to create account. Auto-login on success.
-- **Method:** `POST`
-- **Endpoint:** `/api/auth/register/complete`
-- **Request Body:**
-```json
-{
-  "registrationToken": "eyJhbGciOiJIUzI1NiI...",
-  "password": "SecretPassword123!",
-  "fullName": "Nguyen Van A"
-}
-```
-- **Success Response (200 OK):**
-```json
-{
-  "success": true,
-  "message": "Đăng ký tài khoản thành công!",
-  "data": {
-    "accessToken": "ey...",
-    "refreshToken": "...",
-    "userId": "guid-string",
-    "email": "user@example.com",
-    "fullName": "Nguyen Van A",
-    "avatarUrl": null
-  }
-}
-```
-- **Error (400):** Token hết hạn hoặc không hợp lệ, email đã đăng ký.
+Response `200`: auth response.
 
+Ghi chú: Google account phải đã có user trong hệ thống.
 
-### 2. Login
-Authenticate and receive tokens.
-- **Method:** `POST`
-- **Endpoint:** `/api/auth/login`
-- **Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "SecretPassword123!"
-}
-```
-- **Success Response (200 OK):** Same as Register.
+### 3.4 Refresh Token
 
-### 3. Refresh Token
-Get a new AccessToken when the old one expires.
-- **Method:** `POST`
-- **Endpoint:** `/api/auth/refresh-token`
-- **Request Body:**
+`POST /api/auth/refresh-token`
+
+Request:
+
 ```json
 {
   "accessToken": "expired-access-token",
   "refreshToken": "current-refresh-token"
 }
 ```
-- **Success Response (200 OK):** New `accessToken` and `refreshToken`.
 
-### 4. Update Profile
-- **Method:** `PUT`
-- **Endpoint:** `/api/auth/profile`
-- **Request Body:**
+Response `200`: auth response mới.
+
+### 3.5 Change Password
+
+`POST /api/auth/change-password`
+
+Auth required.
+
+Request:
+
 ```json
 {
-  "fullName": "New Name",
-  "avatarUrl": "https://image-url.com/avatar.jpg"
+  "currentPassword": "OldPassword123!",
+  "newPassword": "NewPassword123!",
+  "confirmNewPassword": "NewPassword123!"
 }
 ```
 
-### 5. Change Password
-- **Method:** `POST`
-- **Endpoint:** `/api/auth/change-password`
-- **Request Body:**
+Response `200`:
+
 ```json
 {
-  "currentPassword": "old-password",
-  "newPassword": "new-password-123"
+  "success": true,
+  "message": "Đổi mật khẩu thành công. Vui lòng đăng nhập lại với mật khẩu mới."
 }
 ```
 
-### 6. Forgot Password (3-Step Flow)
-Reset a forgotten password using OTP verification.
+### 3.6 Update Profile qua Auth
 
-#### Step 1: Send OTP for Password Reset
-- **Method:** `POST`
-- **Endpoint:** `/api/auth/forgot-password/send-otp`
-- **Request Body:**
+`PUT /api/auth/profile`
+
+Auth required.
+
+Request:
+
+```json
+{
+  "fullName": "Nguyen Van B",
+  "avatarUrl": "https://example.com/avatar.png"
+}
+```
+
+### 3.7 Logout
+
+`POST /api/auth/logout`
+
+Auth required. Backend revoke refresh token.
+
+## 4. Register OTP Flow
+
+### 4.1 Send Registration OTP
+
+`POST /api/auth/register/send-otp`
+
+Request:
+
 ```json
 {
   "email": "user@example.com"
 }
 ```
-- **Success Response (200 OK):**
+
+Response `200`:
+
 ```json
 {
   "success": true,
-  "message": "Nếu email hợp lệ, mã OTP đã được gửi. Vui lòng kiểm tra hộp thư (bao gồm thư rác)."
+  "message": "Mã OTP đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư (bao gồm thư rác)."
 }
 ```
 
-#### Step 2: Verify Forgot Password OTP
-- **Method:** `POST`
-- **Endpoint:** `/api/auth/forgot-password/verify-otp`
-- **Request Body:**
+### 4.2 Verify Registration OTP
+
+`POST /api/auth/register/verify-otp`
+
+Request:
+
 ```json
 {
   "email": "user@example.com",
   "otp": "123456"
 }
 ```
-- **Success Response (200 OK):**
+
+Response `200`:
+
 ```json
 {
   "success": true,
   "message": "Xác nhận OTP thành công.",
-  "resetToken": "eyJhbGciOiJIUzI1NiI..."
+  "registrationToken": "jwt-registration-token"
 }
 ```
 
-#### Step 3: Reset Password
-- **Method:** `POST`
-- **Endpoint:** `/api/auth/forgot-password/reset`
-- **Request Body:**
+### 4.3 Complete Registration
+
+`POST /api/auth/register/complete`
+
+Request:
+
 ```json
 {
-  "resetToken": "eyJhbGciOiJIUzI1NiI...",
-  "newPassword": "NewPassword123!"
+  "registrationToken": "jwt-registration-token",
+  "password": "Password123!",
+  "fullName": "Nguyen Van A"
 }
 ```
-- **Success Response (200 OK):**
+
+Response `200`:
+
 ```json
 {
   "success": true,
-  "message": "Mật khẩu đã được thiết lập lại thành công. Vui lòng đăng nhập với mật khẩu mới."
-}
-```
-
----
-
-## � Synchronization (`api/sync`)
-*This is the primary endpoint for mobile apps to keep local data in sync with the server.*
-
-- **Method:** `POST`
-- **Endpoint:** `/api/sync`
-- **Request Body (`SyncRequest`):**
-```json
-{
-  "lastSyncTime": "2024-02-08T10:00:00Z", 
-  "changes": [
-    {
-      "clientId": "550e8400-e29b-41d4-a716-446655440000",
-      "noteId": 12,
-      "title": "Meeting Notes",
-      "shortPreview": "Discussing project X...",
-      "fullContent": "Full content of the meeting...",
-      "isPinned": true,
-      "isDeleted": false,
-      "createdAt": "2024-01-01T08:00:00Z",
-      "updatedAt": "2024-02-08T11:30:00Z"
-    }
-  ]
-}
-```
-- **Success Response (200 OK):**
-```json
-{
-  "upserts": [
-    {
-      "clientId": "eb72-...",
-      "noteId": 15,
-      "title": "Server Updated Note",
-      "shortPreview": "...",
-      "fullContent": "...",
-      "isPinned": false,
-      "isDeleted": false,
-      "createdAt": "2024-02-08T09:00:00Z",
-      "updatedAt": "2024-02-08T12:00:00Z"
-    }
-  ],
-  "serverTime": "2024-02-08T12:05:00Z",
-  "stats": {
-    "clientChangesReceived": 1,
-    "inserted": 0,
-    "updated": 1,
-    "conflicts": 0,
-    "serverChangesReturned": 1
+  "message": "Đăng ký tài khoản thành công!",
+  "data": {
+    "accessToken": "jwt",
+    "refreshToken": "refresh-token",
+    "userId": "user-id",
+    "email": "user@example.com",
+    "fullName": "Nguyen Van A",
+    "avatarUrl": null
   }
 }
 ```
-*Note: Mobile should store `serverTime` as the next `lastSyncTime`.*
 
----
+## 5. Forgot Password Flow
 
-## � Cloud Notes (`api/notes`)
-*Use these for direct online operations or single-note management.*
+### 5.1 Send OTP
 
-### 1. List Notes
-- **Method:** `GET`
-- **Endpoint:** `/api/notes?search=abc&pageIndex=1&pageSize=10`
-- **Success Response (200 OK):** `List<NoteDto>` (See Model section).
+`POST /api/auth/forgot-password/send-otp`
 
-### 2. Create Note
-- **Method:** `POST`
-- **Endpoint:** `/api/notes`
-- **Request Body:**
+Request:
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+### 5.2 Verify OTP
+
+`POST /api/auth/forgot-password/verify-otp`
+
+Request:
+
+```json
+{
+  "email": "user@example.com",
+  "otp": "123456"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "message": "Xác nhận OTP thành công.",
+  "resetToken": "jwt-reset-token"
+}
+```
+
+### 5.3 Reset Password
+
+`POST /api/auth/forgot-password/reset`
+
+Request:
+
+```json
+{
+  "resetToken": "jwt-reset-token",
+  "newPassword": "NewPassword123!"
+}
+```
+
+## 6. Notes API
+
+Tất cả endpoint yêu cầu auth và dùng `ApiLimiter`.
+
+### 6.1 List Notes
+
+`GET /api/notes?search=meeting&pageIndex=1&pageSize=10`
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "noteId": 1,
+      "clientId": "550e8400-e29b-41d4-a716-446655440000",
+      "userId": "user-id",
+      "title": "Meeting",
+      "shortPreview": "Summary",
+      "fullContent": "Full text",
+      "isPinned": false,
+      "isDeleted": false,
+      "createdAt": "2026-06-02T00:00:00Z",
+      "updatedAt": "2026-06-02T00:00:00Z"
+    }
+  ],
+  "totalCount": 1,
+  "pageIndex": 1,
+  "pageSize": 10,
+  "totalPages": 1
+}
+```
+
+### 6.2 Get By Id
+
+`GET /api/notes/{id}`
+
+### 6.3 Create
+
+`POST /api/notes`
+
+Request:
+
 ```json
 {
   "title": "New Note",
-  "shortPreview": "Preview...",
-  "fullContent": "Large text content...",
+  "shortPreview": "Preview",
+  "fullContent": "Full content",
   "isPinned": false
 }
 ```
 
-### 3. Update Note
-- **Method:** `PUT`
-- **Endpoint:** `/api/notes/{id}`
-- **Request Body:** Same as Create Note.
+### 6.4 Update
 
-### 4. Delete/Restore Note
-- **DELETE** `/api/notes/{id}`: Move to trash.
-- **PATCH** `/api/notes/{id}/restore`: Restore from trash.
+`PUT /api/notes/{id}`
 
----
+Request: giống create.
 
-## 🤖 AI Features (`api/ai`)
-*Exclusive to VIP members.*
+### 6.5 Delete
 
-### 1. General AI Request (Summarize, Grammar, Ideas)
-- **Method:** `POST`
-- **Endpoints:** `/api/ai/summarize`, `/api/ai/grammar`, `/api/ai/ideas`
-- **Request Body:**
+`DELETE /api/notes/{id}`
+
+Soft delete, trả `204 No Content` nếu thành công.
+
+### 6.6 Restore
+
+`PATCH /api/notes/{id}/restore`
+
+## 7. Sync API
+
+`POST /api/sync`
+
+Auth required, dùng `ApiLimiter`.
+
+Request:
+
 ```json
 {
-  "content": "The text you want AI to process...",
+  "lastSyncTime": "2026-06-02T00:00:00Z",
+  "changes": [
+    {
+      "clientId": "550e8400-e29b-41d4-a716-446655440000",
+      "noteId": null,
+      "title": "Offline note",
+      "shortPreview": "Preview",
+      "fullContent": "Full content",
+      "isPinned": false,
+      "isDeleted": false,
+      "createdAt": "2026-06-02T00:00:00Z",
+      "updatedAt": "2026-06-02T00:10:00Z"
+    }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "upserts": [],
+  "serverTime": "2026-06-02T00:11:00Z",
+  "stats": {
+    "clientChangesReceived": 1,
+    "inserted": 1,
+    "updated": 0,
+    "conflicts": 0,
+    "serverChangesReturned": 0
+  }
+}
+```
+
+Client phải lưu `serverTime` làm `lastSyncTime` cho lần sync kế tiếp.
+
+## 8. AI API
+
+Auth required. Chỉ VIP được dùng AI.
+
+Endpoints:
+
+- `POST /api/ai/summarize`
+- `POST /api/ai/grammar`
+- `POST /api/ai/translate`
+- `POST /api/ai/ideas`
+- `GET /api/ai/quota`
+
+Request AI chung:
+
+```json
+{
+  "content": "Text to process",
+  "targetLanguage": "vi",
   "noteId": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
-### 2. Translate
-- **Method:** `POST`
-- **Endpoint:** `/api/ai/translate`
-- **Request Body:**
-```json
-{
-  "content": "Hello world",
-  "targetLanguage": "vi",
-  "noteId": "..."
-}
-```
+Response:
 
-### 3. AI Response Body
-- **Success Response (200 OK):**
 ```json
 {
-  "result": "Processed text from AI...",
+  "result": "Processed text",
   "isSuccess": true,
   "errorMessage": null,
-  "inputTokens": 150,
-  "outputTokens": 80,
-  "remainingQuota": 9999
+  "inputTokens": 100,
+  "outputTokens": 50,
+  "remainingQuota": 2147483646
 }
 ```
 
-### 4. AI Quota
-- **Method:** `GET`
-- **Endpoint:** `/api/ai/quota`
-- **Response:**
-```json
-{
-  "dailyLimit": 2147483647,
-  "usedToday": 5,
-  "remaining": 2147483647,
-  "isVip": true,
-  "resetTime": "2024-02-09T00:00:00.0000000Z"
-}
-```
+Free user sẽ nhận `403 Forbidden`.
 
----
+## 9. Subscription API
 
-## 💎 Subscription (`api/subscription`)
+Auth required.
 
-### 1. Quick Status
-- **Method:** `GET`
-- **Endpoint:** `/api/subscription/status`
-- **Response:**
+### 9.1 Status
+
+`GET /api/subscription/status`
+
 ```json
 {
   "isVip": true,
   "planType": "PremiumMonthly",
   "status": "Active",
-  "startDate": "2024-02-01T10:00:00Z",
-  "endDate": "2024-03-01T10:00:00Z",
-  "daysRemaining": 22,
+  "startDate": "2026-06-01T00:00:00Z",
+  "endDate": "2026-07-01T00:00:00Z",
+  "daysRemaining": 29,
   "isAutoRenew": false
 }
 ```
 
-### 2. Detailed Info
-- **Method:** `GET`
-- **Endpoint:** `/api/subscription/details`
-- **Response:**
+### 9.2 Is VIP
+
+`GET /api/subscription/is-vip`
+
 ```json
 {
-  "hasSubscription": true,
-  "subscription": {
-    "id": 101,
-    "userId": "...",
-    "planType": 1,
-    "status": 1,
-    "startDate": "...",
-    "endDate": "...",
-    "isAutoRenew": false,
-    "createdAt": "...",
-    "updatedAt": "..."
+  "isVip": true
+}
+```
+
+### 9.3 Details
+
+`GET /api/subscription/details`
+
+### 9.4 Create Upgrade Request
+
+`POST /api/subscription/requests`
+
+Request:
+
+```json
+{
+  "planType": 1,
+  "note": "Đã chuyển khoản, mã giao dịch ABC123"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Yêu cầu nâng cấp đã được gửi thành công. Vui lòng chờ Admin phê duyệt.",
+  "data": {
+    "id": 10,
+    "planType": "PremiumMonthly",
+    "planName": "Premium (Tháng)",
+    "status": "Pending",
+    "note": "Đã chuyển khoản, mã giao dịch ABC123",
+    "adminNote": null,
+    "createdAt": "2026-06-02T00:00:00Z",
+    "processedAt": null
   }
 }
 ```
 
----
+### 9.5 My Requests
 
-## 👤 User Profile (`api/user`)
+`GET /api/subscription/requests/my`
 
-### 1. Get My Profile
-Get complete profile information including user info, subscription plan, note counts, and AI usage statistics.
-- **Method:** `GET`
-- **Endpoint:** `/api/user/profile`
-- **Auth Required:** ✅ Bearer Token
-- **Success Response (200 OK):**
+### 9.6 Cancel Request
+
+`PUT /api/subscription/requests/{id}/cancel`
+
+Chỉ hủy được request thuộc user hiện tại và còn `Pending`.
+
+### 9.7 Test Activate
+
+`POST /api/subscription/test-activate?durationDays=30&planType=PremiumMonthly`
+
+Endpoint này chỉ nên dùng cho development/testing.
+
+## 10. User Profile API
+
+### 10.1 Get Profile
+
+`GET /api/user/profile`
+
+Auth required, dùng `ApiLimiter`.
+
+Response:
+
 ```json
 {
-  "userId": "guid-string",
+  "userId": "user-id",
   "email": "user@example.com",
   "fullName": "Nguyen Van A",
-  "avatarUrl": "https://image-url.com/avatar.jpg",
-  "subscription": {
-    "planName": "Premium (Tháng)",
-    "planType": "PremiumMonthly",
-    "isVip": true,
-    "status": "Active",
-    "startDate": "2024-02-01T10:00:00Z",
-    "endDate": "2024-03-01T10:00:00Z",
-    "daysRemaining": 22,
-    "isAutoRenew": false
-  },
-  "totalNotesBackedUp": 45,
-  "activeNotes": 40,
-  "aiUsage": {
-    "usedToday": 5,
-    "usedThisMonth": 38,
-    "usedThisYear": 120,
-    "totalUsed": 120,
-    "todayByAction": [
-      { "actionType": "Summarize", "count": 2 },
-      { "actionType": "FixGrammar", "count": 1 },
-      { "actionType": "Translate", "count": 2 }
-    ]
-  }
-}
-```
-- **Free User Response Example:**
-```json
-{
-  "userId": "guid-string",
-  "email": "freeuser@example.com",
-  "fullName": "Free User",
   "avatarUrl": null,
   "subscription": {
     "planName": "Free",
@@ -445,82 +572,28 @@ Get complete profile information including user info, subscription plan, note co
 }
 ```
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `userId` | String | User's unique identifier |
-| `email` | String | User's email address |
-| `fullName` | String | User's display name |
-| `avatarUrl` | String? | User's avatar URL (nullable) |
-| `subscription.planName` | String | Display name: "Free", "Premium (Tháng)", "Premium (Năm)" |
-| `subscription.planType` | String | Enum: "Free", "PremiumMonthly", "PremiumYearly" |
-| `subscription.isVip` | Bool | Whether user has active premium subscription |
-| `subscription.status` | String? | "Active", "Cancelled", "Expired", or null |
-| `subscription.daysRemaining` | Int? | Days until subscription expires |
-| `totalNotesBackedUp` | Int | Total notes synced to server (including deleted) |
-| `activeNotes` | Int | Notes that are not soft-deleted |
-| `aiUsage.usedToday` | Int | AI requests made today |
-| `aiUsage.usedThisMonth` | Int | AI requests made this month |
-| `aiUsage.usedThisYear` | Int | AI requests made this year |
-| `aiUsage.totalUsed` | Int | All-time AI request count |
-| `aiUsage.todayByAction` | Array | Breakdown by action type for today |
+### 10.2 Update Profile
 
-### 2. Edit My Profile
-Update the current user's profile. Returns the full updated profile.
-- **Method:** `PUT`
-- **Endpoint:** `/api/user/profile`
-- **Auth Required:** ✅ Bearer Token
-- **Request Body:**
+`PUT /api/user/profile`
+
+Request:
+
 ```json
 {
   "fullName": "Nguyen Van B",
-  "avatarUrl": "https://image-url.com/new-avatar.jpg"
+  "avatarUrl": "https://example.com/avatar.png"
 }
 ```
-- **Success Response (200 OK):**
-```json
-{
-  "success": true,
-  "message": "Cập nhật thông tin thành công",
-  "data": {
-    "userId": "guid-string",
-    "email": "user@example.com",
-    "fullName": "Nguyen Van B",
-    "avatarUrl": "https://image-url.com/new-avatar.jpg",
-    "subscription": { ... },
-    "totalNotesBackedUp": 45,
-    "activeNotes": 40,
-    "aiUsage": { ... }
-  }
-}
-```
-- **Notes:**
-  - `fullName`: Required, max 100 characters
-  - `avatarUrl`: Optional - send `null` to keep current avatar
-  - User **cannot** change their email (only Admin can)
 
----
+## 11. Common Error Codes
 
-## 🛠 Shared Models (JSON Reference)
+| Status | Ý nghĩa |
+| --- | --- |
+| 400 | Validation hoặc business rule lỗi |
+| 401 | Token thiếu/sai/hết hạn |
+| 403 | Không đủ quyền, không phải VIP hoặc vượt quota |
+| 404 | Không tìm thấy tài nguyên |
+| 429 | Vượt rate limit |
+| 500 | Lỗi server |
 
-### `NoteDto` / `NoteSyncDto`
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `clientId` | UUID | **Primary Key for Mobile**. Must be unique per note. |
-| `noteId` | Int? | Server identity. May be null for new local notes. |
-| `title` | String | Note title (Max 200/255 chars). |
-| `shortPreview`| String? | Short text snippet. |
-| `fullContent` | String? | Markdown or Plain text content. |
-| `isPinned` | Bool | Pinned status. |
-| `isDeleted` | Bool | Soft-delete status. |
-| `createdAt` | ISO8601 | Creation time (UTC). |
-| `updatedAt` | ISO8601 | Last modification time (UTC). |
-
----
-
-## ⚠️ Common Error Codes
-- `401 Unauthorized`: Missing or invalid Bearer token.
-- `403 Forbidden`: VIP feature accessed by Free user.
-- `400 BadRequest`: Validation failed (e.g., email format, empty content).
-- `404 NotFound`: Resource (Note) not found.
-- `429 Too Many Requests`: Rate limit exceeded (e.g., OTP send limit).
-- `500 Internal Server Error`: Server-side crash.
+Last updated: 2026-06-02
