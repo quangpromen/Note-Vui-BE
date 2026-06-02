@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using NoteVui.API.Extensions;
 using NoteVui.Application.DTOs.Auth;
 using NoteVui.Application.Interfaces;
 
@@ -7,6 +9,7 @@ namespace NoteVui.API.Controllers;
 
 [Route("api/auth")]
 [ApiController]
+[EnableRateLimiting(RateLimitingExtensions.AuthLimiter)]
 public class AuthController : ControllerBase
 {
     private readonly IIdentityService _identityService;

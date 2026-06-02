@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.OpenApi.Models;
+using NoteVui.API.Extensions;
 using NoteVui.Infrastructure.Identity;
 using NoteVui.Infrastructure.Services;
 
@@ -17,6 +18,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
+builder.Services.AddCustomRateLimiter();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 // 1. Thêm dịch vụ CORS
 builder.Services.AddCors(options =>
@@ -189,6 +191,9 @@ else
 }
 
 app.UseHttpsRedirection();
+
+app.UseRouting();
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
