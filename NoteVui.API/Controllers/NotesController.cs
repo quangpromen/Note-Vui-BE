@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
+using NoteVui.API.Extensions;
 using NoteVui.Application.DTOs.Notes;
 using NoteVui.Application.Services.Interfaces;
 
@@ -11,6 +13,7 @@ namespace NoteVui.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[EnableRateLimiting(RateLimitingExtensions.ApiLimiter)]
 public class NotesController : ControllerBase
 {
     private readonly INoteService _noteService;

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using NoteVui.API.Extensions;
 using NoteVui.Application.DTOs.User;
 using NoteVui.Application.Interfaces;
 using NoteVui.Application.Services.Interfaces;
@@ -14,6 +16,7 @@ namespace NoteVui.API.Controllers;
 [Route("api/user")]
 [ApiController]
 [Authorize]
+[EnableRateLimiting(RateLimitingExtensions.ApiLimiter)]
 public class UserProfileController : ControllerBase
 {
     private readonly IUserProfileService _userProfileService;

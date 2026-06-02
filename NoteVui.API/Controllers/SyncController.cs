@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using NoteVui.API.Extensions;
 using NoteVui.Application.DTOs.Sync;
 using NoteVui.Application.Services.Interfaces;
 using NoteVui.Application.Exceptions;
@@ -13,6 +15,7 @@ namespace NoteVui.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[EnableRateLimiting(RateLimitingExtensions.ApiLimiter)]
 public class SyncController : ControllerBase
 {
     private readonly ISyncService _syncService;
