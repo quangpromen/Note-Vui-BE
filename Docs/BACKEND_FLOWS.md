@@ -1,67 +1,273 @@
-# 🌊 Luồng Hoạt Động Cốt Lõi (Core Backend Flows)
+# NoteVui Backend Flows
 
-Tài liệu này mô tả chi tiết các luồng xử lý (flows) chính bên trong hệ thống Backend (BE) của dự án NoteVui. Nó giúp các nhà phát triển và ban quản trị hiểu rõ bức tranh luồng dữ liệu, thao tác logic từ lúc tiếp nhận request đến khi trả về response.
+Tài liệu này mô tả các luồng xử lý chính của backend NoteVui, từ lúc API nhận request đến khi trả response. Nội dung bám theo mã nguồn hiện tại của `NoteVui.API`, `NoteVui.Application`, `NoteVui.Infrastructure` và `NoteVui.Domain`.
 
----
+## 1. Tổng Quan Kiến Trúc
 
-## 1. 🔐 Luồng Đăng ký & Xác thực (Authentication & Registration Flow)
-Luồng này đảm bảo an toàn tối đa cho hệ thống bằng cách xác thực danh tính người dùng thật qua Email, chống spam, giả mạo và các cuộc tấn công Brute-force.
+- `NoteVui.API`: chứa controllers, middleware pipeline, CORS, Swagger, JWT Bearer, rate limiting và đăng ký DI.
+- `NoteVui.Application`: chứa DTOs, interfaces, services nghiệp vụ như Notes, Sync, Admin, SubscriptionRequest, Vip, UserProfile.
+- `NoteVui.Infrastructure`: chứa EF Core `ApplicationDbContext`, Identity, CurrentUserService, OTP, Mail, Gemini AI.
+- `NoteVui.Domain`: chứa entity và enum lõi như `Note`, `NoteContent`, `AppUser`, `UserSubscription`, `SubscriptionRequest`, `AiUsageLog`.
 
-**A. Quy trình Đăng ký 3 bước an toàn (OTP Flow)**
-1. **Gửi Request (Step 1):** Client gọi API Gửi OTP cùng Email. BE kiểm tra _Rate Limit_ (không quá 5 yêu cầu/10 phút). Nếu Email đã tồn tại, BE giữ im lặng (trả về OK giả nhưng không gửi mail) để chống dò tìm (Email Enumeration). Nếu Email hợp lệ, hệ thống tạo OTP 6 số, băm `SHA-256`, lưu vào RAM (`ConcurrentDictionary`) và gửi qua dịch vụ `MailKit`.
-2. **Xác thực OTP (Step 2):** Client gửi mã OTP người dùng nhập. BE kiểm tra thời hạn (5 phút), chặn nhập sai quá lần cho phép (tối đa 5 lần). Nếu đúng, BE sinh ra một token tạm chứa Claim `purpose=registration` có thời hạn 10 phút, tự động hủy bỏ OTP trong RAM để dọn rác, trả token này về Client.
-3. **Hoàn tất Đăng ký (Step 3):** Client gửi Token đăng ký + Mật khẩu + Họ tên. BE kiểm tra tính hợp lệ của Token, nếu mọi thứ hợp lệ (cùng thuật toán HMAC, đúng mục đích, còn hạn), tài khoản người dùng (`AppUser`) sẽ chính thức được khởi tạo trong Database (`SQL Server`). 
+## 2. Middleware Và Security Pipeline
 
-**B. Quy trình Cấp đổi Token (Refresh Token Flow)**
-- Khi Access Token hế hạn (thường là 1-2 tiếng), Client kích hoạt cơ chế cấp lại bằng cách gửi cặp `AccessToken` (có thể đã hết hạn) và `RefreshToken` còn hạn nạp vào DB.
-- BE kiểm tra cặp khóa này trùng khớp hoàn toàn trong Database. Nếu thỏa mãn, BE sinh lại Access Token + Refresh Token mới giúp người dùng không bị văng khỏi hệ thống. Vòng quay này lặp lại liên tục cho đến khi Refresh Token quá hạn (Ví dụ: sau 7 ngày không vào app).
+Pipeline chính trong `Program.cs`:
 
-**C. Quy trình Quên Mật Khẩu (Forgot Password Flow)**
-- **Gửi Request (Step 1):** Client gọi API Gửi OTP cùng Email. BE kiểm tra và ẩn thông báo lỗi nếu email không tồn tại (chống Email Enumeration attack). Tạo và gửi OTP 6 số qua MailKit nếu hợp lệ. Giới hạn tần suất gọi.
-- **Xác thực OTP (Step 2):** Client nhập Email + OTP. BE xác minh vòng đời OTP và giới hạn nhập sai. Nếu trùng khớp, cấp đoạn mã `ResetToken` (JWT sống 10 phút mang claim `forgot_password`) đồng thời xóa OTP RAM. Server chạy Stateless, không lưu state trong DB.
-- **Thay đổi Mật khẩu (Step 3):** Client gửi `ResetToken` cùng Mật khẩu mới. BE giải mã token kiểm tra Claim và lấy Email. Tiến hành đổi mật khẩu mới trong DB. Tự động bắn một Job chạy nền (Fire-and-forget) báo qua Email: "Đổi mật khẩu thành công ✅" cho User.
+1. Swagger chỉ bật trong môi trường Development.
+2. CORS dùng policy `AllowAll` ở Development và `ProductionLimit` ở môi trường khác.
+3. `UseHttpsRedirection()`.
+4. `UseRouting()`.
+5. `UseRateLimiter()`.
+6. `UseAuthentication()`.
+7. `UseAuthorization()`.
+8. `MapControllers()`.
 
----
+Các lớp bảo vệ hiện có:
 
-## 2. 🔄 Luồng Đồng bộ hóa Dữ liệu (Cloud Sync Flow)
-Đây là "trái tim" của hệ thống NoteVui, giúp dữ liệu ghi chú giữa Mobile App (Local SQLite) và Server (SQL) luôn được hợp nhất, kể cả khi dùng app ngoại tuyến.
+- JWT Bearer validation: validate issuer, audience, lifetime và signing key.
+- OTP registration token có claim `purpose=registration` bị chặn khi dùng như access token.
+- Rate limiting:
+  - `AuthLimiter`: áp dụng cho `AuthController`, tối đa 5 requests/phút theo IP.
+  - `ApiLimiter`: áp dụng cho Notes, Sync, UserProfile, dùng UserId nếu đã đăng nhập, fallback IP.
+  - `GlobalLimiter`: token bucket toàn ứng dụng để giảm spam/DDoS thô.
+- Account lockout:
+  - User mới được áp dụng lockout.
+  - Sai mật khẩu 5 lần sẽ bị khóa 15 phút.
+  - Login dùng `lockoutOnFailure: true`.
 
-1. **Client khởi xướng (Push/Pull):** Mobile App gửi API `/api/sync` chứa _Thời gian đồng bộ cuối cùng_ (`lastSyncTime`) và danh sách các thay đổi (Insert/Update/Delete) mà người dùng thực hiện khi **Offline**.
-2. **Tiếp nhận & Xử lý Tập trung (Server Side):** 
-   - BE đối chiếu danh sách thay đổi của người dùng với cơ sở dữ liệu.
-   - Các thay đổi trùng lặp sẽ bị loại bỏ, ưu tiên bản ghi có `UpdatedAt` mới nhất (Cơ chế chống Race-condition/Bất đồng bộ).
-   - Server cập nhật hoặc thêm mới (`Upsert`) các bản ghi chưa được đồng bộ từ Client.
-3. **Kiểm tra giới hạn (Quota Check):** Nếu tài khoản ở gói cấu hình `Free`, BE đo lường dung lượng hiện có. Nếu tổng ghi chú chuẩn bị đẩy lên vượt quá `50 Notes`, BE sẽ _Rollback_ giao dịch, trả thông báo `403 Forbidden` bắt nâng cấp VIP.
-4. **Trả dữ liệu (Response Cycle):** BE dò tìm Database để tra các ghi chú đã được chỉnh sửa trên nền tảng khác mốc `lastSyncTime` của Client và gửi xuống. Đánh dấu `serverTime` mới kết thúc chu kỳ.
+Khi bị rate limit, API trả `429 Too Many Requests`, có header `Retry-After` và body `ProblemDetails`.
 
----
+## 3. Authentication Và Registration Flow
 
-## 3. 🤖 Luồng Xử Lý Trí Tuệ Nhân Tạo (AI Features Flow)
-Thực thi các tính năng đặc thù (Tóm tắt, Dịch thuật, Sửa lỗi văn phạm) và tính cước.
+### 3.1 Register Trực Tiếp
 
-1. **Gateway Check:** Client gửi nội dung dạng thô cần AI xử lý. BE truy xuất JWT xem Client hiện tại đang là UID nào. 
-2. **Validation & Quota (Chốt chặn User):** BE gọi `IVipService` truy vết bảng `UserSubscription`. Trạng thái có đang là `Active` không? `EndDate` lớn hơn giờ hiện tại không?
-   - Nếu `False` ❌ → Block API ngay lập tức (`403 Forbidden`).
-   - Nếu `True` ✅ → Thông quan.
-3. **Tương tác API bên thứ ba (LLM Call):** Nội dung đính kèm Prompt gốc được đóng gói gửi qua HTTP Client ra ngoài `Google Gemini API`.
-4. **Log & Tính cước (Audit Log):** Sau khi Response trả về, BE tự động tính đếm số lượng Token đầu vào (Prompt) và đầu ra (Completion), lưu lại _Action Type_ (vd: Summarize, Translate) vào bảng `DailyAiUsages` để quản lý tần suất và chống lạm dụng hệ thống từ tài khoản VIP.
+Endpoint: `POST /api/auth/register`
 
----
+Luồng xử lý:
 
-## 4. 💎 Luồng Nâng cấp & Quản lý Hội viên (Subscription Lifecycle)
-1. **Khởi tạo:** User thực hiện thanh toán. Ở môi trường Dev, Client trực tiếp gọi `/api/subscription/test-activate`. Ở môi trường Prod, đây là luồng _Webhook_ nhận về từ Cổng Thanh Toán (VNPAY/Stripe...).
-2. **Kích hoạt (Activation):** 
-   - Xác nhận hóa đơn thành công. 
-   - BE đẩy record vào bảng `PaymentTransactions`. 
-   - Tại bảng phụ `UserSubscription`, cập nhật thông tin `PlanType` gán lên `PremiumMonthly/Yearly`, `StartDate` thành ngày hiện tại, cấp hạn cho `EndDate` + 30 ngày / + 365 ngày tương ứng, `Status = Active`.
-3. **Lão hóa & Chặn đặc quyền (Grace Period & Expired):**
-   - Hệ thống đánh giá dựa trên Realtime, không tốn resource chạy CronJob liên tục. Sự chuyển trạng thái từ `Active` xuống `Expired` tự động diễn ra theo logic thời gian (`EndDate < Now`).
-   - Nếu người dùng hủy đăng ký tự động (Auto-Renew Off), trạng thái chuyển sang `Cancelled` nhưng *vẫn được phép tận hưởng quyền lợi* cho đến khi chạm mốc `EndDate`.
+1. Client gửi `email`, `password`, `fullName`.
+2. Backend kiểm tra email đã tồn tại chưa.
+3. Nếu chưa tồn tại, tạo `AppUser` bằng ASP.NET Core Identity.
+4. Nếu tạo thành công, backend sinh access token và refresh token.
 
----
+Ghi chú: luồng OTP registration hiện cũng tồn tại và nên là luồng ưu tiên cho client production.
 
-## 5. 🛠 Luồng Quản trị (Admin Management Flow)
-Dành cho người có Role `Admin` truy cập từ Dashboard `admin.notevui.com`.
-1. **Kiểm duyệt Role:** Token mang `Role=Admin` là vé thông hành duy nhất vào `/api/admin/*`.
-2. **Truy vấn Thống kê:** Flow này lấy dữ liệu dạng Read-Only (thống kê tổng doanh thu hàng tháng theo transaction thành công, tổng new users). Được tối ưu Query bằng `AsNoTracking()`.
-3. **Hành động Khẩn (Mutating Actions):** Khi Admin thực hiện thay pin (Block Account), khóa mật khẩu. Database cập nhật cờ `LockoutEnd` vô thời hạn cho User tương ứng. Quét sạch Refresh Token hiện sống để ép văng phiên làm việc ngay lập tức.
+### 3.2 Register Bằng OTP 3 Bước
+
+Endpoints:
+
+- `POST /api/auth/register/send-otp`
+- `POST /api/auth/register/verify-otp`
+- `POST /api/auth/register/complete`
+
+Luồng xử lý:
+
+1. `send-otp`: backend chuẩn hóa email, nếu email đã tồn tại thì trả OK giả để hạn chế email enumeration. Nếu email hợp lệ, tạo OTP 6 số bằng RNG bảo mật, hash SHA-256 và lưu trong RAM.
+2. `verify-otp`: backend kiểm tra OTP, thời hạn 5 phút và số lần nhập sai tối đa 5. Nếu đúng, backend cấp `registrationToken` JWT sống 10 phút với claim `purpose=registration`.
+3. `complete`: client gửi `registrationToken`, password và fullName. Backend validate token, tạo user và trả auth response.
+
+### 3.3 Login
+
+Endpoint: `POST /api/auth/login`
+
+Luồng xử lý:
+
+1. Backend tìm user theo email.
+2. Nếu không tìm thấy, trả thông báo generic.
+3. Nếu tìm thấy, gọi `CheckPasswordSignInAsync(user, password, lockoutOnFailure: true)`.
+4. Nếu sai mật khẩu, Identity tự tăng `AccessFailedCount`.
+5. Khi sai đủ 5 lần, Identity set `LockoutEnd` trong 15 phút.
+6. Nếu đúng mật khẩu và tài khoản không bị khóa, backend trả access token và refresh token mới.
+
+### 3.4 Google Login
+
+Endpoint: `POST /api/auth/google-login`
+
+Luồng xử lý:
+
+1. Backend validate Google ID token với `GoogleAuth:ClientId`.
+2. Lấy email từ payload đã xác thực.
+3. Chỉ cho login nếu tài khoản đã tồn tại trong hệ thống.
+4. Nếu user bị lockout, backend từ chối.
+5. Nếu hợp lệ, backend cập nhật profile thiếu thông tin và trả token.
+
+### 3.5 Refresh Token
+
+Endpoint: `POST /api/auth/refresh-token`
+
+Luồng xử lý:
+
+1. Client gửi access token cũ và refresh token.
+2. Backend đọc claims từ access token đã hết hạn bằng `ValidateLifetime = false`.
+3. Backend lấy userId từ token, kiểm tra refresh token có khớp DB và chưa hết hạn.
+4. Nếu hợp lệ, sinh access token và refresh token mới.
+
+### 3.6 Change Password Và Logout
+
+Endpoints:
+
+- `POST /api/auth/change-password`
+- `POST /api/auth/logout`
+
+Change password kiểm tra mật khẩu hiện tại, không cho đặt mật khẩu mới giống mật khẩu cũ, đổi mật khẩu bằng Identity, revoke refresh token và gửi email thông báo.
+
+Logout xóa refresh token hiện tại trong user record.
+
+## 4. Forgot Password Flow
+
+Endpoints:
+
+- `POST /api/auth/forgot-password/send-otp`
+- `POST /api/auth/forgot-password/verify-otp`
+- `POST /api/auth/forgot-password/reset`
+
+Luồng xử lý:
+
+1. `send-otp`: kiểm tra email tồn tại, kiểm tra rate limit OTP, tạo OTP và gửi email.
+2. `verify-otp`: xác thực OTP, nếu đúng thì cấp `resetToken` JWT sống 10 phút với claim `purpose=forgot_password`.
+3. `reset`: validate `resetToken`, sinh Identity reset token nội bộ, đổi mật khẩu và gửi email thông báo.
+
+## 5. Notes Flow
+
+Controller: `NotesController`
+
+Endpoints:
+
+- `GET /api/notes`
+- `GET /api/notes/{id}`
+- `POST /api/notes`
+- `PUT /api/notes/{id}`
+- `DELETE /api/notes/{id}`
+- `PATCH /api/notes/{id}/restore`
+
+Luồng xử lý:
+
+1. Tất cả endpoint yêu cầu JWT.
+2. `NoteService` lấy UserId từ `ICurrentUserService`.
+3. Mọi truy vấn note đều lọc theo `UserId`, hạn chế IDOR.
+4. Delete là soft delete bằng `IsDeleted`, `DeletedAt`.
+5. Restore chỉ khôi phục note thuộc user hiện tại.
+
+## 6. Sync Flow
+
+Endpoint: `POST /api/sync`
+
+Mục tiêu: đồng bộ offline-first giữa mobile local DB và server.
+
+Luồng xử lý:
+
+1. Client gửi `lastSyncTime` và danh sách `changes`.
+2. Backend từ chối request nếu có `ClientId == Guid.Empty`.
+3. Backend nhóm thay đổi theo `ClientId`, giữ bản có `UpdatedAt` mới nhất.
+4. Backend lấy các note hiện có theo `UserId` và `ClientId`.
+5. Với note mới hoặc note restore, backend kiểm tra quota.
+6. Conflict dùng chiến lược Last Write Wins: `UpdatedAt` mới hơn sẽ thắng.
+7. Backend trả các thay đổi trên server sau `lastSyncTime`, bao gồm note đã xóa để client xóa local.
+8. Client lưu `serverTime` làm mốc sync tiếp theo.
+
+Quota sync:
+
+- Free user: tối đa 50 active notes.
+- VIP user: không giới hạn.
+- Nếu vượt quota, API trả `403 Forbidden`.
+
+## 7. AI Flow
+
+Controller: `AiController`
+
+Endpoints:
+
+- `POST /api/ai/summarize`
+- `POST /api/ai/grammar`
+- `POST /api/ai/translate`
+- `POST /api/ai/ideas`
+- `GET /api/ai/quota`
+
+Luồng xử lý:
+
+1. User phải đăng nhập.
+2. Backend kiểm tra VIP bằng `IVipService`.
+3. User không phải VIP bị chặn `403 Forbidden`.
+4. VIP user được gọi Gemini API qua `GeminiAiService`.
+5. Backend ghi log vào `AiUsageLogs` cho cả request thành công và thất bại.
+6. API quota hiện trả unlimited cho VIP và 0 cho Free.
+
+## 8. Subscription Flow
+
+Controller: `SubscriptionController`
+
+Endpoints user:
+
+- `GET /api/subscription/status`
+- `GET /api/subscription/is-vip`
+- `GET /api/subscription/details`
+- `POST /api/subscription/test-activate`
+- `POST /api/subscription/requests`
+- `GET /api/subscription/requests/my`
+- `PUT /api/subscription/requests/{id}/cancel`
+
+Luồng subscription request:
+
+1. User gửi yêu cầu nâng cấp bằng `POST /api/subscription/requests`.
+2. Backend không cho tạo thêm nếu đang có request `Pending`.
+3. User có thể xem request của mình.
+4. User chỉ có thể hủy request thuộc chính mình và còn `Pending`.
+5. Admin approve/reject request qua Admin API.
+6. Khi approve, backend tạo hoặc cập nhật `UserSubscription`.
+
+Ghi chú bảo mật: `/api/subscription/test-activate` là endpoint dev/test. Không nên mở trong production nếu không có bảo vệ bổ sung.
+
+## 9. Admin Flow
+
+Controller: `AdminController`
+
+Tất cả endpoint yêu cầu role `Admin`.
+
+Endpoints:
+
+- `GET /api/admin/stats`
+- `GET /api/admin/users`
+- `POST /api/admin/users/{id}/lock`
+- `GET /api/admin/users/{id}/subscription`
+- `PUT /api/admin/users/{id}/subscription`
+- `GET /api/admin/users/{id}/detail`
+- `PUT /api/admin/users/{id}/profile`
+- `POST /api/admin/users`
+- `GET /api/admin/subscription-requests`
+- `POST /api/admin/subscription-requests/{id}/approve`
+- `POST /api/admin/subscription-requests/{id}/reject`
+
+Luồng xử lý chính:
+
+1. JWT phải có role `Admin`.
+2. Dashboard stats đọc dữ liệu tổng hợp bằng query read-only.
+3. User management hỗ trợ search, pagination, lock/unlock, edit profile, tạo user.
+4. Subscription management cho phép admin set plan trực tiếp hoặc duyệt request nâng cấp.
+5. Admin lock dùng `LockoutEnd = DateTimeOffset.MaxValue`; unlock đặt `LockoutEnd = null`.
+
+## 10. Common Error Handling
+
+- `400 Bad Request`: dữ liệu không hợp lệ hoặc business rule không thỏa.
+- `401 Unauthorized`: thiếu hoặc sai access token.
+- `403 Forbidden`: không đủ quyền, không phải VIP hoặc vượt quota.
+- `404 Not Found`: tài nguyên không tồn tại hoặc không thuộc user hiện tại.
+- `429 Too Many Requests`: vượt rate limit.
+- `500 Internal Server Error`: lỗi server không mong muốn.
+
+## 11. Cấu Hình Cần Có
+
+Các nhóm cấu hình quan trọng:
+
+- `ConnectionStrings:DefaultConnection`
+- `JwtSettings:Key`
+- `JwtSettings:Issuer`
+- `JwtSettings:Audience`
+- `JwtSettings:DurationInMinutes`
+- `EmailSettings`
+- `GoogleAuth:ClientId`
+- `AiSettings:GeminiApiKey`
+- `AiSettings:GeminiApiUrl`
+
+Không nên lưu secret thật trong `appsettings.json`. Với development nên dùng User Secrets; production nên dùng biến môi trường hoặc secret manager.
+
+Last updated: 2026-06-02

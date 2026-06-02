@@ -68,7 +68,7 @@ public class IdentityService : IIdentityService
             throw new Exception("Invalid email or password.");
         }
 
-        var result = await _signInManager.CheckPasswordSignInAsync(user, request.Password, false);
+        var result = await _signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
 
         if (!result.Succeeded)
         {

@@ -1,97 +1,228 @@
-# 🏢 NoteVui Business Rules
+# NoteVui Business Rules
 
-Tài liệu này mô tả các quy tắc nghiệp vụ (Business Rules) hiện đang vận hành trong hệ thống Backend.
+Tài liệu này mô tả các quy tắc nghiệp vụ và bảo mật đang áp dụng trong backend NoteVui.
 
-## 1. 🤖 Tính năng AI (AI Features)
+## 1. Authentication Và Account Security
 
-> **Quy tắc cốt lõi (Core Rule):** Chỉ thành viên VIP mới có quyền sử dụng các tính năng AI.
+### 1.1 Đăng ký tài khoản
 
-| Gói Thành Viên | Quyền Truy Cập | Giới hạn (Quota) | Ghi chú |
-| :--- | :--- | :--- | :--- |
-| **Free User** | ❌ **Bị khóa** | 0 requests/ngày | API trả về lỗi `403 Forbidden` nếu cố tình truy cập. |
-| **VIP User** | ✅ **Được phép** | **Không giới hạn** | Được sử dụng mọi tính năng (Tóm tắt, Dịch, Grammar, Ideas). |
+Hệ thống hỗ trợ hai luồng đăng ký:
 
-### Chi tiết kỹ thuật:
-- **API Endpoint**: `/api/ai/*`
-- **Cơ chế kiểm soát**: 
-  - Hệ thống kiểm tra `UserSubscription` có trạng thái `Active` và còn hạn sử dụng (`EndDate > Now`).
-  - Nếu không thỏa mãn, request bị chặn ngay lập tức.
-  - API `/get-quota` trả về `dailyLimit: 0` đối với user Free.
+- `POST /api/auth/register`: đăng ký trực tiếp bằng email/password/fullName.
+- OTP flow:
+  - `POST /api/auth/register/send-otp`
+  - `POST /api/auth/register/verify-otp`
+  - `POST /api/auth/register/complete`
 
----
+Luồng OTP là luồng khuyến nghị cho production vì email được xác thực trước khi tạo tài khoản.
 
-## 2. 🔄 Đồng bộ dữ liệu (Sync & Storage)
+### 1.2 OTP
 
-> **Quy tắc cốt lõi (Core Rule):** User Free bị giới hạn số lượng ghi chú (Notes) lưu trữ trên Cloud.
+Quy tắc OTP:
 
-| Gói Thành Viên | Giới hạn lưu trữ (Max Notes) | Hành vi khi vượt quá giới hạn |
-| :--- | :--- | :--- |
-| **Free User** | **50 Notes** | - Không thể tạo thêm Note mới (Insert bị chặn).<br>- Vẫn có thể chỉnh sửa (Update) hoặc xóa (Delete) Note cũ.<br>- Vẫn có thể tải về (Pull) dữ liệu. |
-| **VIP User** | **Không giới hạn** | Lưu trữ thoải mái. |
+- OTP gồm 6 chữ số.
+- OTP được tạo bằng `RandomNumberGenerator`.
+- OTP không lưu plaintext, chỉ lưu SHA-256 hash trong RAM.
+- OTP hết hạn sau 5 phút.
+- Tối đa 5 lần verify sai cho mỗi OTP.
+- Tối đa 5 lần gửi OTP cho mỗi email trong cửa sổ 10 phút.
+- OTP được xóa sau khi verify thành công.
 
-### Chi tiết kỹ thuật:
-- **API Endpoint**: `/api/sync`
-- **Cơ chế kiểm soát**: 
-  - Khi Client gửi request `PUSH` (đẩy dữ liệu lên), hệ thống đếm tổng số Notes hiện tại trong DB.
-  - **Cơ chế chống trùng lặp**: Nếu request chứa nhiều thay đổi cho cùng một `ClientId` (do lỗi mobile/retry), hệ thống sẽ gộp nhóm và chỉ xử lý bản ghi có `UpdatedAt` mới nhất.
-  - Nếu `(Tổng hiện tại + Số Note mới) > 50` VÀ User là Free -> Chặn Insert/Restore, trả về lỗi `403 Forbidden`.
-  - Message bắt buộc: *"Bạn đã đạt giới hạn 50 ghi chú. Vui lòng nâng cấp VIP để lưu trữ thêm."*
+### 1.3 Account lockout
 
----
+Quy tắc khóa tài khoản khi đăng nhập sai:
 
-## 3. 👑 Hệ thống Hội viên (Membership System)
+- Áp dụng cho user mới.
+- Sai mật khẩu 5 lần sẽ khóa tài khoản.
+- Thời gian khóa: 15 phút.
+- Login dùng `lockoutOnFailure: true`, nên Identity tự tăng `AccessFailedCount`.
 
-### 3.1. Các trạng thái (Status)
-- **Active (0)**: Đang hoạt động, hưởng đầy đủ quyền lợi VIP.
-- **Cancelled (1)**: Đã hủy gia hạn nhưng vẫn còn trong thời gian hiệu lực. Vẫn được hưởng quyền lợi VIP cho đến ngày kết thúc (`EndDate`).
-- **Expired (2)**: Đã hết hạn. Mất quyền lợi VIP, trở về trạng thái Free User.
+Mục tiêu: giảm brute-force password và credential stuffing.
 
-### 3.2. Quy tắc kích hoạt
-- **Development**: Có thể dùng API `/api/subscription/test-activate` để tự kích hoạt gói mà không cần thanh toán (chỉ hiệu lực trên môi trường Dev).
-- **Production**: Phải thông qua quy trình thanh toán (Payment Gateway) để cập nhật trạng thái đơn hàng -> Kích hoạt Subscription.
+### 1.4 Token
 
-### 3.3. Xử lý hết hạn
-- Hệ thống **tự động chốt quyền** dựa trên `EndDate` và `Status`. Không cần chạy Job quét định kỳ để khóa tài khoản, việc kiểm tra được thực hiện realtime mỗi khi gọi API.
+Access token:
 
----
+- Dùng JWT Bearer.
+- Validate issuer, audience, lifetime và signing key.
+- Có claims UserId, Email, JTI, FullName và Role.
 
-## 4. 🛠 Quản trị hệ thống (Admin Management)
+Refresh token:
 
-> **Quy tắc cốt lõi (Core Rule):** Chỉ người dùng có Role `Admin` mới có quyền truy cập module quản trị.
+- Lưu trên `AppUser`.
+- Refresh token có hạn 7 ngày.
+- Khi refresh thành công, backend cấp access token và refresh token mới.
+- Khi đổi mật khẩu hoặc logout, refresh token bị revoke.
 
-### 4.1. Quyền hạn của Admin
-- Xem báo cáo doanh thu và chỉ số tăng trưởng người dùng.
-- Tra cứu danh sách người dùng và trạng thái gói cước (VIP/Free).
-- **Khóa tài khoản (Lockout)**: Có quyền khóa hoặc mở khóa bất kỳ tài khoản nào nếu vi phạm quy định.
+Registration token và forgot-password token:
 
-### 4.2. Cơ chế bảo mật
-- Mọi yêu cầu Admin đều được kiểm tra Role thông qua JWT Token.
-- Role `Admin` được cấu hình trực tiếp trong Database (bảng Roles).
+- Là JWT ngắn hạn 10 phút.
+- Có claim `purpose`.
+- Registration token không được phép dùng để gọi API thường.
 
----
+## 2. Rate Limiting
 
-## 5. 🛡️ Xác thực & Bảo mật (Security & Authentication)
+Hệ thống có 3 lớp rate limiting:
 
-> **Quy tắc cốt lõi (Core Rule):** Hệ thống áp dụng tiêu chuẩn bảo mật mức cao (Enterprise-Grade) cho toàn bộ quy trình định danh người dùng.
+| Policy | Phạm vi | Giới hạn | Partition key |
+| --- | --- | --- | --- |
+| `AuthLimiter` | `AuthController` | 5 requests/phút | IP thật từ `X-Forwarded-For`, fallback `RemoteIpAddress` |
+| `ApiLimiter` | Notes, Sync, UserProfile | token bucket 40 token, refill 10 token/10 giây | UserId nếu authenticated, fallback IP |
+| `GlobalLimiter` | Toàn ứng dụng | token bucket 120 token, refill 20 token/10 giây | UserId hoặc IP |
 
-### 5.1. Luồng đăng ký 3 bước bằng OTP Email
-Hệ thống không cho phép tạo tài khoản trực tiếp. Thay vào đó, quy trình đăng ký bắt buộc phải thông qua xác minh email với mã OTP 6 số:
-1. Gửi OTP đến email.
-2. Xác minh OTP để cấp một Token cấp phép đặc biệt (`registrationToken`).
-3. Dùng token đó để hoàn tất việc đăng ký tạo người dùng.
+Khi bị giới hạn:
 
-### 5.2. Các chốt chặn bảo mật (Backend Security Highlight)
-Để đáp ứng chuẩn dự án thực tế, Backend đã được áp dụng các biện pháp bảo vệ sâu:
-- **Chống Email Enumeration**: API Gửi OTP sẽ không bao giờ báo lỗi "Email đã tồn tại", kẻ xấu không thể lợi dụng API này để dò quét tệp email khách hàng.
-- **Hash OTP trên RAM**: OTP không được lưu dưới dạng Plaintext, mà được băm bằng thuật toán `SHA-256` trước khi đưa vào Ram (Sử dụng `ConcurrentDictionary`).
-- **Chống Timing Attack**: So sánh OTP hash bằng thuật toán thời gian hằng số `CryptographicOperations.FixedTimeEquals()` thay vì so sánh chuỗi thông thường.
-- **Rate-Limiting & Brute-Force Protection**: 
-  - Chỉ cho phép gửi tối đa 5 mã OTP / 10 phút. 
-  - Chỉ cho phép nhập sai tối đa 5 lần trước khi mã OTP bị hủy hoàn toàn.
-- **Phân lập Token (Token Isolation)**: Token được cấp ở bước verify OTP KHÔNG THỂ đem dùng làm Access Token để chọc vào các API khác của hệ thống, Backend sẽ chủ động từ chối.
-- **Tự dọn dẹp bộ nhớ (Garbage Collection)**: Timer chạy ngầm dọn các OTP đã quá hạn 5 phút mỗi 15 phút để chống tràn RAM.
+- HTTP status: `429 Too Many Requests`.
+- Header: `Retry-After`.
+- Body: `ProblemDetails`.
 
----
+Mục tiêu:
 
-*Tài liệu được cập nhật tự động theo mã nguồn hiện tại.*
-*Last updated: 2026-02-26*
+- Chống brute-force login.
+- Chống spam OTP.
+- Giảm request bất thường vào API sync/notes.
+- Có lớp bảo vệ ngoài cùng trước DDoS thô.
+
+## 3. Notes Và Sync
+
+### 3.1 Quyền sở hữu dữ liệu
+
+Mỗi note thuộc một `UserId`. Backend luôn lọc dữ liệu theo user hiện tại.
+
+Quy tắc:
+
+- User chỉ đọc được note của mình.
+- User chỉ update/delete/restore note của mình.
+- Delete là soft delete.
+- Restore chỉ áp dụng cho note đã soft delete.
+
+### 3.2 Sync offline-first
+
+Sync dùng `ClientId` làm định danh chính giữa mobile và server.
+
+Quy tắc:
+
+- `ClientId` không được rỗng.
+- Nếu request có nhiều thay đổi cùng `ClientId`, backend giữ bản có `UpdatedAt` mới nhất.
+- Conflict dùng Last Write Wins.
+- Pull response bao gồm note đã xóa để mobile đồng bộ trạng thái xóa.
+- `serverTime` phải được mobile lưu làm `lastSyncTime` kế tiếp.
+
+### 3.3 Giới hạn số lượng note
+
+| Gói | Giới hạn cloud notes | Hành vi khi vượt |
+| --- | --- | --- |
+| Free | 50 active notes | Chặn insert/restore mới, trả `403 Forbidden` |
+| VIP | Không giới hạn | Cho phép lưu thêm |
+
+Update hoặc delete note cũ vẫn được phép nếu không làm tăng số note active.
+
+## 4. AI Features
+
+AI là tính năng chỉ dành cho VIP.
+
+| Gói | Quyền dùng AI | Quota |
+| --- | --- | --- |
+| Free | Bị chặn | 0 |
+| VIP | Được phép | Không giới hạn theo code hiện tại |
+
+Endpoint AI:
+
+- `POST /api/ai/summarize`
+- `POST /api/ai/grammar`
+- `POST /api/ai/translate`
+- `POST /api/ai/ideas`
+- `GET /api/ai/quota`
+
+Quy tắc:
+
+- User phải đăng nhập.
+- Backend kiểm tra `UserSubscription`.
+- VIP hợp lệ khi `Status == Active`, `PlanType != Free`, `EndDate > DateTime.UtcNow`.
+- Mọi request AI được ghi vào `AiUsageLogs`.
+- Nếu Gemini API lỗi, API trả thông báo generic cho client.
+
+## 5. Subscription Và VIP
+
+### 5.1 PlanType
+
+| Giá trị | Tên |
+| --- | --- |
+| 0 | Free |
+| 1 | PremiumMonthly |
+| 2 | PremiumYearly |
+
+### 5.2 SubscriptionStatus
+
+| Giá trị | Tên | Ý nghĩa |
+| --- | --- | --- |
+| 0 | Active | Đang hoạt động |
+| 1 | Cancelled | Đã hủy nhưng có thể còn hạn |
+| 2 | Expired | Đã hết hạn |
+
+### 5.3 VIP check
+
+User là VIP khi:
+
+- Có subscription record.
+- `PlanType != Free`.
+- `Status == Active`.
+- `EndDate > DateTime.UtcNow`.
+
+### 5.4 Subscription request
+
+User gửi yêu cầu nâng cấp để Admin duyệt.
+
+Quy tắc:
+
+- User không được tạo request mới nếu đang có request `Pending`.
+- Request phải là plan premium, không phải `Free`.
+- User chỉ xem và hủy request của chính mình.
+- Chỉ request `Pending` mới được hủy.
+- Admin approve sẽ kích hoạt hoặc cập nhật subscription.
+- Admin reject có thể kèm lý do.
+
+### 5.5 Dev test subscription
+
+Endpoint `POST /api/subscription/test-activate` tồn tại để test. Endpoint này không nên mở tự do trong production.
+
+## 6. Admin Rules
+
+Admin API yêu cầu role `Admin`.
+
+Admin có quyền:
+
+- Xem dashboard stats.
+- Xem danh sách user.
+- Khóa/mở khóa user.
+- Xem chi tiết user.
+- Sửa profile user, bao gồm email.
+- Tạo user.
+- Set subscription trực tiếp.
+- Duyệt/từ chối subscription request.
+
+Khóa user bằng Admin:
+
+- Lock: set `LockoutEnd` rất xa trong tương lai.
+- Unlock: xóa `LockoutEnd`.
+
+## 7. Error Rules
+
+| Status | Ý nghĩa |
+| --- | --- |
+| 400 | Input sai hoặc business rule không thỏa |
+| 401 | Chưa đăng nhập hoặc token sai |
+| 403 | Không đủ quyền, không phải VIP, hoặc vượt quota |
+| 404 | Không tìm thấy tài nguyên |
+| 429 | Vượt rate limit |
+| 500 | Lỗi server |
+
+## 8. Production Notes
+
+- Không lưu secret thật trong `appsettings.json`.
+- Không log access token hoặc refresh token.
+- Nên bảo vệ hoặc tắt `/api/subscription/test-activate` ở production.
+- Nên cấu hình CORS production bằng domain thật.
+- Nên dùng HTTPS ở mọi môi trường public.
+
+Last updated: 2026-06-02
